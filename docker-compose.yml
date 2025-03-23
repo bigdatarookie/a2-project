@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  jupyter:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8888:8888"
+    volumes:
+      - a1-data:/app/data
+    environment:
+      - JUPYTER_TOKEN=${JUPYTER_TOKEN}
+    restart: unless-stopped
+
+volumes:
+  a1-data:
+    name: a1-data 

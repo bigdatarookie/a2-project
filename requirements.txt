@@ -1,0 +1,17 @@
+# data handling
+numpy
+pandas
+pandas_ta
+# plot
+matplotlib
+mplfinance
+# market data & paper trading API
+yfinance
+tinkoff-investments # t.DBEaAVcPDDWGkElTk898UNX9yH_ADegVdZgaWKC4a-Ktgz1sbbd-G_9yQf0PeiVEeKuoMWEpUuMT-TNCQzaw1g
+grpcio
+protobuf
+# portfolio optimization
+PyPortfolioOpt
+# to calculate feature importance
+xgboost
+scikit-learn
