@@ -1,17 +1,21 @@
 # data handling
-numpy
-pandas
-pandas_ta
+numpy==1.19.5
+pandas>=1.1.5
+pandas_ta>=0.3.14b0
+dotenv
+# web scraping & data handling
+requests
+beautifulsoup4
 # plot
 matplotlib
 mplfinance
 # market data & paper trading API
 yfinance
-tinkoff-investments # t.DBEaAVcPDDWGkElTk898UNX9yH_ADegVdZgaWKC4a-Ktgz1sbbd-G_9yQf0PeiVEeKuoMWEpUuMT-TNCQzaw1g
+tinkoff-investments
 grpcio
 protobuf
 # portfolio optimization
 PyPortfolioOpt
-# to calculate feature importance
+# machine learning & feature importance
 xgboost
-scikit-learn
+scikit-learn<2.1.0  # Pin to a version compatible with Python 3.9
