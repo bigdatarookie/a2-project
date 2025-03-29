@@ -16,18 +16,18 @@ logger = logging.getLogger(__name__)
 def extract_tickers(url: str = "https://www.tradingview.com/symbols/RUS-RTSI/components/") -> List[str]:
     """
     Extracts stock tickers from TradingView for RTS index components.
-    
+
     Args:
         url: URL of the TradingView components page for RTS index
-        
+
     Returns:
         List of ticker symbols
-        
+
     Raises:
         requests.exceptions.RequestException: If all retries fail
     """
     logger.info(f"Extracting tickers from {url}")
-    
+
     for attempt in range(MAX_RETRIES):
         try:
             # Send a GET request to the webpage with timeout
@@ -43,7 +43,7 @@ def extract_tickers(url: str = "https://www.tradingview.com/symbols/RUS-RTSI/com
 
             # Extract tickers from the 'data-rowkey' attribute
             tickers = [row['data-rowkey'].split(':')[1] for row in rows if 'data-rowkey' in row.attrs]
-            
+
             logger.info(f"Successfully extracted {len(tickers)} tickers")
             return tickers
 
@@ -55,4 +55,4 @@ def extract_tickers(url: str = "https://www.tradingview.com/symbols/RUS-RTSI/com
                 time.sleep(sleep_time)
             else:
                 logger.error("All retries failed. Exiting.")
-                raise 
+                raise

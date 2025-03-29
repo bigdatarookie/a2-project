@@ -19,7 +19,7 @@ def fetch_data(args: argparse.Namespace) -> None:
         log_level=logging.DEBUG if args.verbose else logging.INFO,
         log_file=args.log_file
     )
-    
+
     # Parse dates
     try:
         start_date = datetime.fromisoformat(args.start_date)
@@ -28,7 +28,7 @@ def fetch_data(args: argparse.Namespace) -> None:
         print(f"Error parsing dates: {str(e)}")
         print("Dates should be in ISO format: YYYY-MM-DD")
         sys.exit(1)
-    
+
     # Fetch data
     try:
         get_rts_data(
@@ -50,7 +50,7 @@ def process_data(args: argparse.Namespace) -> None:
         log_level=logging.DEBUG if args.verbose else logging.INFO,
         log_file=args.log_file
     )
-    
+
     # Process data
     try:
         process_file_with_indicators(
@@ -69,19 +69,19 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Tdata - Financial Market Data Collection and Processing"
     )
-    
+
     # Common arguments
     parser.add_argument(
-        "--verbose", "-v", 
-        action="store_true", 
+        "--verbose", "-v",
+        action="store_true",
         help="Enable verbose logging"
     )
     parser.add_argument(
-        "--log-file", 
-        type=str, 
+        "--log-file",
+        type=str,
         help="Log file path"
     )
-    
+
     # Create subparsers for commands
     subparsers = parser.add_subparsers(
         title="commands",
@@ -89,10 +89,10 @@ def main() -> None:
         help="Command to execute",
         required=True
     )
-    
+
     # Fetch command
     fetch_parser = subparsers.add_parser(
-        "fetch", 
+        "fetch",
         help="Fetch market data from Tinkoff API"
     )
     fetch_parser.add_argument(
@@ -121,10 +121,10 @@ def main() -> None:
         help="Tinkoff API token (overrides environment variable)"
     )
     fetch_parser.set_defaults(func=fetch_data)
-    
+
     # Process command
     process_parser = subparsers.add_parser(
-        "process", 
+        "process",
         help="Process data and calculate technical indicators"
     )
     process_parser.add_argument(
@@ -148,12 +148,12 @@ def main() -> None:
         help="Don't optimize data types"
     )
     process_parser.set_defaults(func=process_data)
-    
+
     # Parse arguments
     args = parser.parse_args()
-    
+
     # Execute command
     args.func(args)
 
 if __name__ == "__main__":
-    main() 
+    main()

@@ -45,4 +45,4 @@ MAX_PERIODS = {
     'CANDLE_INTERVAL_4_HOUR': 90,    # days
     'CANDLE_INTERVAL_DAY': 365,      # days
     'CANDLE_INTERVAL_WEEK': 365 * 5, # days
-} 
+}
