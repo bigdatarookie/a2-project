@@ -12,8 +12,8 @@ services:
       - JUPYTER_TOKEN=${JUPYTER_TOKEN}
     env_file:
       - .env
-    restart: unless-stopped
+    restart: "no"
 
 volumes:
   a1-data:
-    name: a1-data 
+    name: a1-data

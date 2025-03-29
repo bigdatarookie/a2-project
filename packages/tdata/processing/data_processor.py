@@ -7,8 +7,8 @@ import logging
 import pandas as pd
 from typing import Optional, Union, List
 
-from tdata.config import DATA_DIR
-from tdata.processing.indicators import calculate_indicators
+from packages.tdata.config import DATA_DIR, CACHE_DIR
+from packages.tdata.processing.indicators import calculate_indicators
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -17,7 +17,8 @@ def process_file_with_indicators(
     input_file: str,
     output_file: Optional[str] = None,
     drop_na: bool = True,
-    optimize_types: bool = True
+    optimize_types: bool = True,
+    force_recalculate: bool = False
 ) -> pd.DataFrame:
     """
     Process a CSV file with OHLCV data to calculate technical indicators.
@@ -27,6 +28,7 @@ def process_file_with_indicators(
         output_file: Optional name for output file (without extension)
         drop_na: Whether to drop rows with NaN values after calculation
         optimize_types: Whether to optimize data types to reduce memory usage
+        force_recalculate: Whether to force recalculation of indicators even if cached result exists
 
     Returns:
         DataFrame with calculated indicators
@@ -45,6 +47,32 @@ def process_file_with_indicators(
             input_file = data_dir_path
         else:
             raise FileNotFoundError(f"Input file not found: {input_file}")
+
+    # Extract just the filename without path for cache naming
+    input_filename = os.path.basename(input_file)
+    base_filename = os.path.splitext(input_filename)[0]
+
+    # Define cache file path
+    cache_file = os.path.join(CACHE_DIR, f"{base_filename}_processed.pkl")
+
+    # Check if cached processed data exists and if we're not forcing recalculation
+    if os.path.exists(cache_file) and not force_recalculate:
+        logger.info(f"Loading processed data from cache: {cache_file}")
+        processed_df = pd.read_pickle(cache_file)
+
+        # Save to output file if specified
+        if output_file:
+            # Ensure data directory exists
+            os.makedirs(DATA_DIR, exist_ok=True)
+
+            # Define output path
+            output_path = os.path.join(DATA_DIR, f"{output_file}.csv")
+
+            # Save to CSV
+            processed_df.to_csv(output_path, index=False)
+            logger.info(f"Saved processed data to {output_path}")
+
+        return processed_df
 
     # Read the CSV file with parsed dates
     df = pd.read_csv(input_file, parse_dates=["date"])
@@ -105,6 +133,11 @@ def process_file_with_indicators(
         dropped = before_len - len(processed_df)
         if dropped > 0:
             logger.info(f"Dropped {dropped} rows with NaN values")
+
+    # Save to cache
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    processed_df.to_pickle(cache_file)
+    logger.info(f"Saved processed data to cache: {cache_file}")
 
     # Save to output file if specified
     if output_file:

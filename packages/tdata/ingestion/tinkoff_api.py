@@ -8,11 +8,13 @@ import time
 from datetime import datetime, timedelta
 from typing import List, Tuple, Dict, Any, Optional
 from tinkoff.invest.sandbox.client import SandboxClient as Client
-from tinkoff.invest import SecurityTradingStatus
+from tinkoff.invest import SecurityTradingStatus, CandleInterval
 from tinkoff.invest.services import InstrumentsService
 from tinkoff.invest.utils import quotation_to_decimal
+import random
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from tdata.config import TINKOFF_TOKEN, MAX_PERIODS, DEFAULT_RATE_LIMIT_PAUSE
+from packages.tdata.config import TINKOFF_TOKEN, MAX_PERIODS, DEFAULT_RATE_LIMIT_PAUSE
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -97,8 +99,12 @@ def fetch_ohlcv_data(
 
     logger.info(f"Fetching OHLCV data for {len(ticker_figis)} instruments from {start_date} to {end_date}")
 
+    # If no ticker_figis provided, return empty list immediately
+    if not ticker_figis:
+        return []
+
     # Define the maximum period per request for this interval
-    max_duration = timedelta(days=MAX_PERIODS.get(interval, 1))
+    max_duration = timedelta(days=7)  # Increase from 1 day to 7 days if possible
 
     # List to store data for all instruments
     data_rows = []
@@ -106,25 +112,73 @@ def fetch_ohlcv_data(
     total_figis = len(ticker_figis)
     total_data_points = 0
 
+    # Convert string interval to proper enum
+    interval_map = {
+        "1min": CandleInterval.CANDLE_INTERVAL_1_MIN,
+        "5min": CandleInterval.CANDLE_INTERVAL_5_MIN,
+        "15min": CandleInterval.CANDLE_INTERVAL_15_MIN,
+        "1hour": CandleInterval.CANDLE_INTERVAL_HOUR,
+        "2hour": CandleInterval.CANDLE_INTERVAL_2_HOUR,
+        "4hour": CandleInterval.CANDLE_INTERVAL_4_HOUR,
+        "1day": CandleInterval.CANDLE_INTERVAL_DAY,
+        "1week": CandleInterval.CANDLE_INTERVAL_WEEK
+    }
+
+    if interval not in interval_map:
+        valid_intervals = ", ".join(interval_map.keys())
+        raise ValueError(f"Invalid interval: {interval}. Valid intervals: {valid_intervals}")
+
+    interval_enum = interval_map[interval]
+
     with Client(token) as client:
-        for figi_index, (ticker, figi) in enumerate(ticker_figis, start=1):
-            logger.info(f"Processing {ticker} ({figi}) [{figi_index}/{total_figis}]...")
+        # Add smarter rate limit handling with exponential backoff
+        def get_candles_with_retry(client, figi, from_date, to_date, interval_enum, max_retries=5):
+            retries = 0
+            backoff_time = DEFAULT_RATE_LIMIT_PAUSE
+
+            while retries < max_retries:
+                try:
+                    return client.market_data.get_candles(
+                        figi=figi,
+                        from_=from_date,
+                        to=to_date,
+                        interval=interval_enum
+                    )
+                except Exception as e:
+                    error_message = str(e)
+                    if "RESOURCE_EXHAUSTED" in error_message:
+                        # Extract reset time if available
+                        reset_time = DEFAULT_RATE_LIMIT_PAUSE
+                        if hasattr(e, 'metadata') and hasattr(e.metadata, 'ratelimit_reset'):
+                            reset_time = int(e.metadata.ratelimit_reset)
+
+                        # Add jitter to avoid all clients hitting at once
+                        wait_time = reset_time + random.uniform(0, 2)
+                        logger.warning(f"Rate limit exceeded. Waiting for {wait_time:.1f} seconds...")
+                        time.sleep(wait_time)
+                        retries += 1
+                        # Exponential backoff
+                        backoff_time *= 1.5
+                    else:
+                        # For other errors, raise immediately
+                        raise
+
+            # If we exhausted retries
+            raise Exception(f"Max retries exceeded when fetching candles for {figi}")
+
+        # Process tickers in parallel (with care)
+        # This is a bit risky with rate limits, but can be done carefully
+        def process_ticker(ticker_figi):
+            ticker, figi = ticker_figi
+            logger.info(f"Processing {ticker} ({figi})...")
+            data_points = []
             current_start = start_date
-            figi_data_points = 0
 
             while current_start < end_date:
-                # Calculate the end of the current chunk
                 current_end = min(current_start + max_duration, end_date)
                 try:
-                    # Fetch candles for the current chunk
-                    candles = client.market_data.get_candles(
-                        figi=figi,
-                        from_=current_start,
-                        to=current_end,
-                        interval=interval,
-                    )
-
-                    # Process each candle
+                    candles = get_candles_with_retry(client, figi, current_start, current_end, interval_enum)
+                    # Process candles...
                     for candle in candles.candles:
                         row = {
                             "figi": figi,
@@ -137,38 +191,24 @@ def fetch_ohlcv_data(
                             "tic": ticker,
                             "day": candle.time.weekday(),
                         }
-                        data_rows.append(row)
-                        figi_data_points += 1
-
-                    # Move to the next time chunk
-                    current_start = current_end
-
+                        data_points.append(row)
                 except Exception as e:
-                    error_message = str(e)
-                    logger.error(f"Error fetching data for {ticker} ({figi}): {error_message}")
+                    logger.error(f"Error processing {ticker}: {str(e)}")
 
-                    # Handle rate limiting
-                    if "RESOURCE_EXHAUSTED" in error_message:
-                        # Try to extract reset time from metadata if available
-                        wait_time = DEFAULT_RATE_LIMIT_PAUSE
-                        if hasattr(e, 'args') and len(e.args) > 0:
-                            metadata = getattr(e.args[-1], 'ratelimit_reset', None)
-                            if metadata:
-                                try:
-                                    wait_time = int(metadata)
-                                except (ValueError, TypeError):
-                                    pass
+                current_start = current_end
 
-                        logger.warning(f"Rate limit exceeded. Waiting for {wait_time} seconds...")
-                        time.sleep(wait_time)
-                        # Don't advance the start date, retry same chunk
-                    else:
-                        # For other errors, skip to next chunk to try to continue
-                        logger.warning(f"Skipping to next time chunk due to error")
-                        current_start = current_end
+            return data_points
 
-            logger.info(f"Completed {ticker}: {figi_data_points} data points")
-            total_data_points += figi_data_points
+        # Use ThreadPoolExecutor with limited workers to avoid hitting rate limits too hard
+        all_data = []
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = {}
+            for ticker_figi in ticker_figis[:10]:  # Process in chunks of 10
+                futures[executor.submit(process_ticker, ticker_figi)] = ticker_figi
 
-    logger.info(f"Total data points fetched: {total_data_points}")
-    return data_rows
+            for future in as_completed(futures):
+                ticker_data = future.result()
+                all_data.extend(ticker_data)
+
+    logger.info(f"Total data points fetched: {len(all_data)}")
+    return all_data

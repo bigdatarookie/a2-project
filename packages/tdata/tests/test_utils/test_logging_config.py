@@ -6,6 +6,9 @@ import pytest
 import logging
 import os
 import tempfile
+from unittest.mock import patch, MagicMock
+
+# Update the import path to use packages prefix
 from packages.tdata.utils.logging_config import setup_logging
 
 def test_setup_logging_console_only():

@@ -46,5 +46,5 @@ RUN pip install -e .
 # Expose Jupyter port
 EXPOSE 8888
 
-# Set the entrypoint to run tests and then start Jupyter
-ENTRYPOINT ["/bin/bash", "-c", "python /app/run_tests.py && jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --notebook-dir=/app/dev"] 
+# Set the entrypoint to run tests first; the script will exit if tests fail
+ENTRYPOINT ["/bin/bash", "-c", "python /app/run_tests.py && jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --notebook-dir=/app"]

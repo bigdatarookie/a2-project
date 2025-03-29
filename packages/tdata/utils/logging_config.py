@@ -52,3 +52,4 @@ def setup_logging(
 
     # Set tdata package logger level
     logging.getLogger('packages.tdata').setLevel(log_level)
+    logging.getLogger('tinkoff.invest.logging').setLevel(logging.WARNING)

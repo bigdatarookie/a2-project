@@ -8,7 +8,7 @@ import time
 from bs4 import BeautifulSoup
 from typing import List, Optional
 
-from tdata.config import MAX_RETRIES, BACKOFF_FACTOR, REQUEST_TIMEOUT
+from packages.tdata.config import MAX_RETRIES, BACKOFF_FACTOR, REQUEST_TIMEOUT
 
 # Configure logger
 logger = logging.getLogger(__name__)

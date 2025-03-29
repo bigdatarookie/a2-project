@@ -8,9 +8,9 @@ import sys
 from datetime import datetime
 from typing import Optional, Dict, Any, List
 
-from tdata.ingestion import get_rts_data
-from tdata.processing import process_file_with_indicators
-from tdata.utils import setup_logging
+from packages.tdata.ingestion import get_rts_data
+from packages.tdata.processing import process_file_with_indicators
+from packages.tdata.utils import setup_logging
 
 def fetch_data(args: argparse.Namespace) -> None:
     """Handle the 'fetch' command."""

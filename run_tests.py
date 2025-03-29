@@ -8,6 +8,7 @@ import os
 import sys
 import pytest
 import logging
+import subprocess
 from packages.tdata.utils import setup_logging
 
 def main():
@@ -32,16 +33,45 @@ def main():
         '--cov-report=term',         # Output coverage report to terminal
     ])
 
+    # Handle pytest exit codes:
+    # 0: All tests passed
+    # 1: Some tests failed
+    # 2: Test execution was interrupted
+    # 3: Internal error
+    # 4: pytest command line usage error
+    # 5: No tests collected
     if exit_code == 0:
         print("\n" + "=" * 80)
         print("All tests passed!")
         print("=" * 80)
+        return 0
     else:
+        error_messages = {
+            1: "Some tests failed!",
+            2: "Test execution was interrupted!",
+            3: "Internal error in pytest!",
+            4: "Pytest command line usage error!",
+            5: "No tests were collected!"
+        }
+        message = error_messages.get(exit_code, f"Unknown error (code {exit_code})!")
+
         print("\n" + "=" * 80)
-        print("Some tests failed!")
+        print(f"{message} Stopping container.")
         print("=" * 80)
 
-    return exit_code
+        # Force stop the container using subprocess
+        try:
+            # Get container ID using Docker command
+            container_id = os.environ.get('HOSTNAME')
+            if container_id:
+                print(f"Forcing container to stop...")
+                # Exit with non-zero code to ensure the container doesn't restart
+                os._exit(1)
+        except Exception as e:
+            print(f"Error stopping container: {e}")
+
+        # Exit with the same code that pytest returned if we're still running
+        sys.exit(exit_code)
 
 if __name__ == "__main__":
     sys.exit(main())
