@@ -9,7 +9,8 @@ RUN apt-get update && apt-get install -y \
     libpng-dev \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --user -r requirements.txt \
-    && pip install --user jupyter
+    && pip install --user jupyter \
+    && pip install --user pytest pytest-cov pytest-mock
 
 # Runtime stage
 FROM python:3.11-slim
@@ -27,14 +28,23 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Create directories
-RUN mkdir -p /app/dev /app/data
+RUN mkdir -p /app/data
 
 # Set environment variables
 ENV PYTHONPATH=/app
 ENV JUPYTER_ENABLE_LAB=yes
 
+# Copy the application code
+COPY packages/ /app/packages/
+COPY setup.py /app/
+COPY run_tests.py /app/
+
+# Install the tdata package in development mode
+WORKDIR /app
+RUN pip install -e .
+
 # Expose Jupyter port
 EXPOSE 8888
 
-# Start Jupyter
-CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--notebook-dir=/app/dev"] 
+# Set the entrypoint to run tests and then start Jupyter
+ENTRYPOINT ["/bin/bash", "-c", "python /app/run_tests.py && jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --notebook-dir=/app/dev"] 

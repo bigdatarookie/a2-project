@@ -1,4 +1,3 @@
-
 services:
   jupyter:
     build:
@@ -7,10 +6,12 @@ services:
     ports:
       - "8888:8888"
     volumes:
-      - ./dev:/app/dev
       - a1-data:/app/data
+      - ./packages:/app/packages
     environment:
       - JUPYTER_TOKEN=${JUPYTER_TOKEN}
+    env_file:
+      - .env
     restart: unless-stopped
 
 volumes:
