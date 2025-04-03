@@ -570,6 +570,7 @@ print(f"Final drawdown: {info['drawdown']:.4f}")
 # %%
 # Import necessary libraries for advanced training setup
 from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3 import A2C
 from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnRewardThreshold
 from stable_baselines3.common.monitor import Monitor
 import torch
@@ -655,8 +656,8 @@ eval_callback = EvalCallback(
     callback_on_new_best=stop_train_callback,
     eval_freq=2500,              # Evaluate more frequently
     n_eval_episodes=5,           # Number of episodes to evaluate on
-    best_model_save_path="./models/",  # Save the best model
-    log_path="./logs/",          # Path to save evaluation logs
+    best_model_save_path="data/models/",  # Save the best model
+    log_path="data/logs/",          # Path to save evaluation logs
     deterministic=True,          # Use deterministic actions for evaluation
     verbose=1
 )

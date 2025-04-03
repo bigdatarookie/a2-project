@@ -16,6 +16,8 @@ scikit-learn>=1.2.0,<2.0.0  # Optimized for newer Python
 torch>=2.0.0,<3.0.0  # Much better performance on Python 3.11
 gymnasium>=0.29.0,<0.30.0  # Latest stable
 stable-baselines3>=2.1.0,<3.0.0  # Latest with gymnasium support
+mlflow
+optuna
 
 # optimization
 cvxpy>=1.3.0,<2.0.0  # Latest with better solver support

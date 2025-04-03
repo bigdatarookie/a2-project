@@ -19,9 +19,6 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 # API Configuration
 TINKOFF_TOKEN = os.getenv('TINKOFF_TOKEN')
 
-# Data Storage Configuration
-DATA_DIR = os.getenv('DATA_DIR', 'data')
-
 # API Request Configuration
 MAX_RETRIES = 3
 BACKOFF_FACTOR = 2
