@@ -83,21 +83,9 @@ def process_file_with_indicators(
         df['date'] = df['date'].dt.tz_convert(None).dt.tz_localize(None)
         logger.info("Removed timezone information from date column")
 
-    # Rename columns for indicator calculation (which expects capitalized names)
-    column_remap = {
-        'open': 'Open',
-        'high': 'High',
-        'low': 'Low',
-        'close': 'Close',
-        'volume': 'Volume'
-    }
-    for old_col, new_col in column_remap.items():
-        if old_col in df.columns:
-            df.rename(columns={old_col: new_col}, inplace=True)
-
     # Optimize data types to reduce memory usage
     if optimize_types:
-        numeric_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+        numeric_cols = ['open', 'high', 'low', 'close', 'volume']
         df[numeric_cols] = df[numeric_cols].astype('float32')
         logger.info("Optimized numeric data types")
 

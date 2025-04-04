@@ -21,6 +21,13 @@ from torch import nn
 import optuna
 import mlflow
 import os
+import warnings
+
+# Silence the Git warnings from MLflow
+os.environ['GIT_PYTHON_REFRESH'] = 'quiet'
+
+# Disable MLflow source code saving (which tries to use Git)
+os.environ["MLFLOW_ENABLE_SOURCECODE_SAVING"] = "false"
 
 # %% [markdown]
 # ## 1. Custom Environment Definition
@@ -29,7 +36,7 @@ import os
 class MultiTickerPortfolioEnv(Env):
     """
     A multi-ticker portfolio environment using real historical stock data.
-    - Uses 'close' prices from multiple tickers in a pandas DataFrame
+    - Uses 'Close' prices from multiple tickers in a pandas DataFrame
     - Actions: Buy/Sell/Hold decisions for each ticker
     - Observations: Price history for all tickers + technical indicators + current allocation percentages
     - Reward: Portfolio return penalized by drawdown
@@ -310,6 +317,7 @@ class MultiTickerPortfolioEnv(Env):
 
         # Calculate volatility for each stock to determine position sizing
         volatilities = []
+        min_volatility = 1e-4  # Define a minimum volatility to avoid division by zero
         for i in range(self.n_stocks):
             # Get recent price history for this stock
             history_window = min(20, self.current_step)  # Use up to 20 periods
@@ -318,15 +326,22 @@ class MultiTickerPortfolioEnv(Env):
                 # Calculate log returns
                 returns = np.diff(np.log(stock_prices))
                 # Calculate volatility (standard deviation of returns)
-                volatility = np.std(returns) if len(returns) > 0 else 0.01
+                volatility = np.std(returns) if len(returns) > 0 else min_volatility
             else:
-                volatility = 0.01  # Default volatility if not enough history
+                volatility = min_volatility  # Default volatility if not enough history
 
+            # Ensure volatility is not below the minimum threshold
+            volatility = max(volatility, min_volatility)
             volatilities.append(volatility)
 
         # Normalize volatilities for inverse weighting (lower volatility = higher allocation)
         total_vol = sum(volatilities) if sum(volatilities) > 0 else len(volatilities)
         inv_vol_weights = [(1 / vol) / (len(volatilities) / total_vol) for vol in volatilities]
+
+        # Safeguard against sum(inv_vol_weights) being zero
+        sum_inv_vol_weights = sum(inv_vol_weights)
+        if sum_inv_vol_weights == 0:
+            sum_inv_vol_weights = 1  # Prevent division by zero
 
         # Execute trades for each stock
         for i, act in enumerate(stock_actions):
@@ -390,16 +405,46 @@ class MultiTickerPortfolioEnv(Env):
 # ## 2. Load and Prepare Data
 
 # %%
-# Load the data
-def load_data(file_path='data/rts_daily_jan.csv'):
-    df = pd.read_csv(file_path)
-    print(f"Loaded data with shape: {df.shape}")
-    print(df.info())
-    return df
+# Tdata library
+from tdata.ingestion import get_rts_data
+from tdata.processing import process_file_with_indicators
+from tdata.utils import setup_logging
+import logging
+
+# Setup logging
+setup_logging(log_level=logging.INFO)
 
 # %%
-# Load data
-df = load_data()
+# Fetch market data
+data = get_rts_data(
+    start_date='2024-01-01',
+    end_date='2024-12-31',
+    interval='2hour',
+    output_file='rts_2h_2024'
+)
+
+# %%
+# Process data with indicators
+processed_data = process_file_with_indicators(
+    input_file='rts_2h_2024.csv',
+    output_file='rts_2h_2024_indicators',
+    force_recalculate=True  # Force recalculation instead of using cache
+)
+
+# %%
+# Read csv and count unique tickers
+df = pd.read_csv('data/rts_2h_2024.csv')
+df['tic'].nunique()
+
+# %%
+# Drop data and processed data variables
+del data
+del processed_data
+
+# %%
+# Load data with ohlcv and selected indicators
+df = pd.read_csv('data/rts_2h_2024_indicators.csv')
+df = df[['tic','date', 'open', 'high', 'low', 'close', 'volume', 'rsi', 'macd_histogram', 'macd_line', 'macd_signal', 'adx']]
 df.head()
 
 # %% [markdown]
@@ -550,7 +595,7 @@ def train_final_model(params, total_timesteps=100000):
         eval_callback = EvalCallback(
             eval_env,
             best_model_save_path="data/models/",
-            log_path="data/logs/",
+            log_path="data/models/logs/",
             eval_freq=2500,
             n_eval_episodes=5,
             deterministic=True,
@@ -582,11 +627,12 @@ def train_final_model(params, total_timesteps=100000):
         mlflow.log_metric("final_mean_reward", mean_reward)
         mlflow.log_metric("final_std_reward", std_reward)
 
-        # Log model
-        mlflow.sklearn.log_model(model, "model")
-
         # Save model locally
-        model.save("data/models/final_model")
+        model_path = "data/models/final_model.zip"
+        model.save(model_path)
+
+        # Log the saved model file as an MLflow artifact instead of using sklearn.log_model
+        mlflow.log_artifact(model_path, "model")
 
         # Clean up
         vectorized_env.close()
@@ -605,6 +651,17 @@ if __name__ == "__main__":
 
     print("Starting hyperparameter optimization...")
     best_params = run_optimization(n_trials=10)  # Adjust number of trials as needed
+
+    print("\nTraining final model with best parameters...")
+    final_model = train_final_model(best_params, total_timesteps=100000)
+
+    print("Training completed.")
+
+# %%
+# Run training
+if __name__ == "__main__":
+    # Set random seed for reproducibility
+    np.random.seed(42)
 
     print("\nTraining final model with best parameters...")
     final_model = train_final_model(best_params, total_timesteps=100000)

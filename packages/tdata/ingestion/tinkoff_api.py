@@ -203,7 +203,7 @@ def fetch_ohlcv_data(
         all_data = []
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {}
-            for ticker_figi in ticker_figis[:10]:  # Process in chunks of 10
+            for ticker_figi in ticker_figis:  # Process all tickers, not just the first 10
                 futures[executor.submit(process_ticker, ticker_figi)] = ticker_figi
 
             for future in as_completed(futures):

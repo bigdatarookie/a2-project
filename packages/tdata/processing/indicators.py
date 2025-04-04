@@ -16,7 +16,8 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
     Calculate technical indicators for a given DataFrame.
 
     Args:
-        df: DataFrame with OHLCV data. Must contain 'High', 'Low', 'Close', 'Volume', 'date' columns.
+        df: DataFrame with OHLCV data. Must contain 'high', 'low', 'close', 'volume', 'date' columns.
+          Column names are case-insensitive.
 
     Returns:
         DataFrame with added technical indicators
@@ -24,7 +25,13 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
     Raises:
         ValueError: If required columns are missing
     """
-    required_columns = ['High', 'Low', 'Close', 'Volume', 'date']
+    # Make a copy of the dataframe to avoid modifying the original
+    df = df.copy()
+
+    # Convert column names to lowercase for case-insensitive handling
+    df.columns = [col.lower() for col in df.columns]
+
+    required_columns = ['high', 'low', 'close', 'volume', 'date']
     for col in required_columns:
         if col not in df.columns:
             raise ValueError(f"Required column '{col}' not found in DataFrame")
@@ -50,14 +57,14 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
         # Calculate technical indicators with error checking
 
         # Relative Strength Index
-        rsi = ta.rsi(df['Close'], length=14)
+        rsi = ta.rsi(df['close'], length=14)
         if rsi is not None:
             df['rsi'] = rsi
         else:
             df['rsi'] = np.nan
 
         # Moving Average Convergence Divergence
-        macd = ta.macd(df['Close'], fast=12, slow=26, signal=9)
+        macd = ta.macd(df['close'], fast=12, slow=26, signal=9)
         if macd is not None and isinstance(macd, pd.DataFrame):
             df['macd_line'] = macd.get('MACD_12_26_9', np.nan)
             df['macd_signal'] = macd.get('MACDs_12_26_9', np.nan)
@@ -66,36 +73,36 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
             df['macd_line'] = df['macd_signal'] = df['macd_histogram'] = np.nan
 
         # Simple Moving Averages
-        df['sma_12'] = ta.sma(df['Close'], length=12)
-        df['sma_26'] = ta.sma(df['Close'], length=26)
-        df['sma_50'] = ta.sma(df['Close'], length=50)
-        df['sma_100'] = ta.sma(df['Close'], length=100)
+        df['sma_12'] = ta.sma(df['close'], length=12)
+        df['sma_26'] = ta.sma(df['close'], length=26)
+        df['sma_50'] = ta.sma(df['close'], length=50)
+        df['sma_100'] = ta.sma(df['close'], length=100)
 
         # Average True Range
-        df['atr'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+        df['atr'] = ta.atr(df['high'], df['low'], df['close'], length=14)
 
         # Bollinger Bands
-        bb = ta.bbands(df['Close'], length=20, std=2)
+        bb = ta.bbands(df['close'], length=20, std=2)
         df['bb_lower'] = bb['BBL_20_2.0']
         df['bb_middle'] = bb['BBM_20_2.0']
         df['bb_upper'] = bb['BBU_20_2.0']
 
         # Volume Weighted Average Price
-        df['vwap'] = ta.vwap(df['High'], df['Low'], df['Close'], df['Volume'])
+        df['vwap'] = ta.vwap(df['high'], df['low'], df['close'], df['volume'])
 
         # Average Directional Index
-        adx = ta.adx(df['High'], df['Low'], df['Close'], length=14)
+        adx = ta.adx(df['high'], df['low'], df['close'], length=14)
         df['adx'] = adx['ADX_14']
         df['adx_positive'] = adx['DMP_14']
         df['adx_negative'] = adx['DMN_14']
 
         # Stochastic Oscillator
-        stoch = ta.stoch(df['High'], df['Low'], df['Close'], k=14, d=3, smooth_k=3)
+        stoch = ta.stoch(df['high'], df['low'], df['close'], k=14, d=3, smooth_k=3)
         df['stoch_k'] = stoch['STOCHk_14_3_3']
         df['stoch_d'] = stoch['STOCHd_14_3_3']
 
         # On-Balance Volume
-        df['obv'] = ta.obv(df['Close'], df['Volume'])
+        df['obv'] = ta.obv(df['close'], df['volume'])
 
         logger.info("Successfully calculated all technical indicators")
 
