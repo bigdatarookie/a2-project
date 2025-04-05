@@ -85,11 +85,11 @@ def fetch_ohlcv_data(
         ticker_figis: List of (ticker, figi) tuples
         start_date: Start date for data fetching
         end_date: End date for data fetching
-        interval: Candle interval (e.g., "CANDLE_INTERVAL_1_MIN")
+        interval: Candle interval (e.g., "1min", "5min", "1hour", "1day")
         token: Tinkoff API token
 
     Returns:
-        DataFrame with OHLCV data for all requested instruments
+        List of dictionaries with OHLCV data for all requested instruments
 
     Raises:
         ValueError: If token is not provided or is invalid
@@ -102,15 +102,6 @@ def fetch_ohlcv_data(
     # If no ticker_figis provided, return empty list immediately
     if not ticker_figis:
         return []
-
-    # Define the maximum period per request for this interval
-    max_duration = timedelta(days=7)  # Increase from 1 day to 7 days if possible
-
-    # List to store data for all instruments
-    data_rows = []
-
-    total_figis = len(ticker_figis)
-    total_data_points = 0
 
     # Convert string interval to proper enum
     interval_map = {
@@ -130,6 +121,21 @@ def fetch_ohlcv_data(
 
     interval_enum = interval_map[interval]
 
+    # Get the maximum period allowed for this interval from MAX_PERIODS
+    # Use the string name of the enum as the key
+    enum_name = str(interval_enum).split('.')[-1]
+
+    # Use a safe default of 1 day if the interval is not found in MAX_PERIODS
+    max_days = MAX_PERIODS.get(enum_name, 1)
+
+    # Define the maximum period per request for this interval
+    max_duration = timedelta(days=max_days)
+
+    logger.info(f"Using maximum period of {max_days} days for interval {interval}")
+
+    # List to store data for all instruments
+    all_data = []
+
     with Client(token) as client:
         # Add smarter rate limit handling with exponential backoff
         def get_candles_with_retry(client, figi, from_date, to_date, interval_enum, max_retries=5):
@@ -146,7 +152,26 @@ def fetch_ohlcv_data(
                     )
                 except Exception as e:
                     error_message = str(e)
-                    if "RESOURCE_EXHAUSTED" in error_message:
+
+                    # Check for period exceeded error (code 30014)
+                    if '30014' in error_message or 'maximum request period' in error_message.lower():
+                        # If we hit this error, reduce the time range and try again
+                        current_days = (to_date - from_date).days
+                        new_days = max(1, current_days // 2)  # Reduce by half but ensure at least 1 day
+
+                        logger.warning(f"Maximum period exceeded for {interval}. Reducing from {current_days} to {new_days} days")
+
+                        # Update MAX_PERIODS for future reference
+                        MAX_PERIODS[enum_name] = min(MAX_PERIODS.get(enum_name, float('inf')), new_days)
+
+                        # If we can't reduce further, raise the error
+                        if current_days <= 1:
+                            raise
+
+                        # Return with a signal to retry with smaller window
+                        return {"retry_with_smaller_window": True, "new_days": new_days}
+
+                    elif "RESOURCE_EXHAUSTED" in error_message:
                         # Extract reset time if available
                         reset_time = DEFAULT_RATE_LIMIT_PAUSE
                         if hasattr(e, 'metadata') and hasattr(e.metadata, 'ratelimit_reset'):
@@ -167,26 +192,42 @@ def fetch_ohlcv_data(
             raise Exception(f"Max retries exceeded when fetching candles for {figi}")
 
         # Process tickers in parallel (with care)
-        # This is a bit risky with rate limits, but can be done carefully
         def process_ticker(ticker_figi):
+            nonlocal max_duration  # Explicitly indicate we're using the outer scope variable
             ticker, figi = ticker_figi
             logger.info(f"Processing {ticker} ({figi})...")
             data_points = []
             current_start = start_date
 
+            # Store the duration locally to allow per-ticker adjustments
+            ticker_max_duration = max_duration
+
             while current_start < end_date:
-                current_end = min(current_start + max_duration, end_date)
+                # Calculate end date for this batch
+                current_end = min(current_start + ticker_max_duration, end_date)
+
                 try:
-                    candles = get_candles_with_retry(client, figi, current_start, current_end, interval_enum)
+                    result = get_candles_with_retry(client, figi, current_start, current_end, interval_enum)
+
+                    # Check if we need to retry with a smaller window
+                    if isinstance(result, dict) and result.get("retry_with_smaller_window"):
+                        # Adjust max_duration based on the smaller window
+                        new_days = result.get("new_days", 1)
+                        ticker_max_duration = timedelta(days=new_days)
+                        # Also update the shared max_duration to help other tickers avoid the same error
+                        max_duration = min(max_duration, ticker_max_duration)
+                        logger.info(f"Retrying with smaller window of {new_days} days")
+                        continue
+
                     # Process candles...
-                    for candle in candles.candles:
+                    for candle in result.candles:
                         row = {
                             "figi": figi,
                             "date": candle.time,
-                            "open": float(candle.open.units + candle.open.nano / 1e9),
-                            "high": float(candle.high.units + candle.high.nano / 1e9),
-                            "low": float(candle.low.units + candle.low.nano / 1e9),
-                            "close": float(candle.close.units + candle.close.nano / 1e9),
+                            "open": float(quotation_to_decimal(candle.open)),
+                            "high": float(quotation_to_decimal(candle.high)),
+                            "low": float(quotation_to_decimal(candle.low)),
+                            "close": float(quotation_to_decimal(candle.close)),
                             "volume": candle.volume,
                             "tic": ticker,
                             "day": candle.time.weekday(),
@@ -195,15 +236,15 @@ def fetch_ohlcv_data(
                 except Exception as e:
                     logger.error(f"Error processing {ticker}: {str(e)}")
 
+                # Move to next time period
                 current_start = current_end
 
             return data_points
 
         # Use ThreadPoolExecutor with limited workers to avoid hitting rate limits too hard
-        all_data = []
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = {}
-            for ticker_figi in ticker_figis:  # Process all tickers, not just the first 10
+            for ticker_figi in ticker_figis:
                 futures[executor.submit(process_ticker, ticker_figi)] = ticker_figi
 
             for future in as_completed(futures):

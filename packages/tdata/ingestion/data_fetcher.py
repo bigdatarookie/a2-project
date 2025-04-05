@@ -9,7 +9,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional, Union
 
-from packages.tdata.config import TINKOFF_TOKEN, INTERVAL_MAPPING, DATA_DIR
+from packages.tdata.config import TINKOFF_TOKEN, INTERVAL_MAPPING, DATA_DIR, INTERVAL_TO_ENUM, MAX_PERIODS
 from packages.tdata.ingestion.ticker_scraper import extract_tickers
 from packages.tdata.ingestion.tinkoff_api import get_figis, fetch_ohlcv_data
 
@@ -37,7 +37,7 @@ def get_rts_data(
     output_file: Optional[str] = None,
     token: str = TINKOFF_TOKEN,
     force_refresh: bool = False,
-    batch_size_days: int = 30
+    batch_size_days: Optional[int] = None
 ) -> pd.DataFrame:
     """
     Fetch market data for all RTS Index components.
@@ -49,7 +49,7 @@ def get_rts_data(
         output_file: Optional filename to save data (without extension)
         token: Tinkoff API token
         force_refresh: Whether to force refresh data from API instead of using cache
-        batch_size_days: Number of days to fetch in each API batch request
+        batch_size_days: Number of days to fetch in each API batch request (if None, will be determined based on interval)
 
     Returns:
         DataFrame with OHLCV data for all RTS components
@@ -92,6 +92,24 @@ def get_rts_data(
     ticker_figis = get_figis(tickers, token)
     logger.info(f"Mapped {len(ticker_figis)} tickers to FIGIs")
 
+    # Determine appropriate batch size based on interval if not specified
+    if batch_size_days is None:
+        # Get enum name for the interval
+        interval_enum_name = None
+        for k, v in INTERVAL_TO_ENUM.items():
+            if k == interval:
+                interval_enum_name = str(v).split('.')[-1]
+                break
+
+        # Set batch size based on MAX_PERIODS configuration
+        if interval_enum_name and interval_enum_name in MAX_PERIODS:
+            batch_size_days = max(1, int(MAX_PERIODS[interval_enum_name] * 0.9))  # Use 90% of max to be safe
+        else:
+            # Default to conservative batch size if interval not found
+            batch_size_days = 1
+
+    logger.info(f"Using batch size of {batch_size_days} days for interval {interval}")
+
     # Implement batch processing by date ranges
     all_data_rows = []
     current_start = start_date
@@ -109,7 +127,7 @@ def get_rts_data(
         all_data_rows.extend(batch_data)
 
         # Move to next batch
-        current_start = batch_end + timedelta(days=1)
+        current_start = batch_end + timedelta(microseconds=1)  # Add microsecond to avoid overlap
 
         logger.info(f"Fetched {len(batch_data)} data points for batch ending {batch_end}")
 

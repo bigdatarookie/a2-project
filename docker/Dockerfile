@@ -27,12 +27,14 @@ RUN apt-get update && apt-get install -y \
     libpng16-16 \
     && rm -rf /var/lib/apt/lists/*
 
-# Create directories
-RUN mkdir -p /app/data
+# Create directories for MLflow and model storage
+RUN mkdir -p /app/data/models/logs /app/data/models/mlflow_experiments
 
 # Set environment variables
 ENV PYTHONPATH=/app
 ENV JUPYTER_ENABLE_LAB=yes
+ENV MLFLOW_TRACKING_URI=file:///app/data/models/mlflow_experiments
+ENV MLFLOW_ARTIFACT_ROOT=/app/data/models/mlflow_experiments
 
 # Copy the application code
 COPY packages/ /app/packages/
@@ -43,8 +45,17 @@ COPY run_tests.py /app/
 WORKDIR /app
 RUN pip install -e .
 
-# Expose Jupyter port
-EXPOSE 8888
+# Expose Jupyter and MLflow ports
+EXPOSE 8888 5000
 
-# Set the entrypoint to run tests first; the script will exit if tests fail
-ENTRYPOINT ["/bin/bash", "-c", "python /app/run_tests.py && jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --notebook-dir=/app"]
+# Create a startup script
+RUN echo '#!/bin/bash\n\
+mlflow server --host 0.0.0.0 --port 5000 \
+--backend-store-uri file:///app/data/models/mlflow_experiments \
+--default-artifact-root /app/data/models/mlflow_experiments &\n\
+mlflow_pid=$!\n\
+python /app/run_tests.py && jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root --notebook-dir=/app\n\
+kill $mlflow_pid' > /app/start.sh && chmod +x /app/start.sh
+
+# Set the entrypoint to run the startup script
+ENTRYPOINT ["/app/start.sh"]

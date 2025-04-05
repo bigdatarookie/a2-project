@@ -5,6 +5,7 @@ services:
       dockerfile: docker/Dockerfile
     ports:
       - "8888:8888"
+      - "5000:5000"
     volumes:
       - a1-data:/app/data
       - ./packages:/app/packages
