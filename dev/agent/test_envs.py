@@ -1,5 +1,5 @@
 # %% [markdown]
-# # This is dedicated to testing custom environments
+# # This notebook is dedicated to testing custom environments
 
 # %%
 # Import libraries

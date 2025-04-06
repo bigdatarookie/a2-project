@@ -34,7 +34,7 @@ class MultiTickerPortfolioEnv(Env):
         date_column: str = 'date',
         ticker_column: str = 'tic',
         feature_columns: Optional[List[str]] = None,
-        transaction_cost: float = 0.0,  # Transaction cost as percentage
+        transaction_cost: float = 0.0005,           # 0.05% transaction cost
         reward_weights: Optional[Dict[str, float]] = None
     ):
         """
