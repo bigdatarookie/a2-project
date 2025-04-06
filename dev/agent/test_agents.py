@@ -173,6 +173,14 @@ def test_agent_initialization(df):
     return agent1, agent2, agent3
 
 # %%
+
+if __name__ == "__main__":
+    # Generate test data
+    df = generate_test_data(n_tickers=5, n_days=500)
+    # 1. Test initialization
+    agent, _, _ = test_agent_initialization(df)
+
+# %%
 # Test A2CAgent training
 def test_agent_training(agent, total_timesteps=10000):
     """Test training of A2CAgent."""

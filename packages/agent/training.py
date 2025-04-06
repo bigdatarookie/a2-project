@@ -10,6 +10,8 @@ from dotenv import load_dotenv
 from typing import Dict, Any, List, Optional, Tuple
 import json
 import shutil
+from contextlib import contextmanager
+import traceback
 from packages.agent.agents import A2CAgent
 from packages.agent.custom_envs import MultiTickerPortfolioEnv
 
@@ -27,317 +29,449 @@ os.makedirs(MODEL_DIR, exist_ok=True)
 os.makedirs(RUNS_DIR, exist_ok=True)
 os.makedirs(ARTIFACTS_DIR, exist_ok=True)
 
-def setup_mlflow(experiment_name: str) -> str:
+def json_serializable(value):
+    """Check if a value can be serialized to JSON."""
+    try:
+        json.dumps(value)
+        return True
+    except (TypeError, OverflowError):
+        return False
+
+class TrainingManager:
     """
-    Setup mlflow tracking for experiment.
-
-    Args:
-        experiment_name: Name of the experiment
-
-    Returns:
-        run_id: The ID of the created mlflow run
+    Class for managing agent training, evaluation, and model versioning
+    with MLflow integration for tracking experiments.
     """
-    # Set tracking URI to local file system
-    mlflow.set_tracking_uri(f"file:{RUNS_DIR}")
 
-    # Get or create experiment
-    experiment = mlflow.get_experiment_by_name(experiment_name)
-    if experiment is None:
-        experiment_id = mlflow.create_experiment(experiment_name)
-    else:
-        experiment_id = experiment.experiment_id
+    def __init__(self, experiment_name: str, model_name: str):
+        """
+        Initialize the training manager.
 
-    # Start new run
-    run = mlflow.start_run(experiment_id=experiment_id)
-    return run.info.run_id
+        Args:
+            experiment_name: Name of the experiment for MLflow
+            model_name: Name of the model for saving
+        """
+        self.experiment_name = experiment_name
+        self.model_name = model_name
+        self.run_id = None
+        self.active_run = None
 
-def log_metrics(metrics: Dict[str, float], step: int) -> None:
-    """
-    Log metrics to mlflow.
+        # Set MLflow tracking URI
+        mlflow.set_tracking_uri(f"file:{RUNS_DIR}")
 
-    Args:
-        metrics: Dictionary of metrics to log
-        step: Current training step
-    """
-    mlflow.log_metrics(metrics, step=step)
+        # Get or create experiment
+        experiment = mlflow.get_experiment_by_name(experiment_name)
+        if experiment is None:
+            self.experiment_id = mlflow.create_experiment(experiment_name)
+        else:
+            self.experiment_id = experiment.experiment_id
 
-def log_parameters(params: Dict[str, Any]) -> None:
-    """
-    Log parameters to mlflow.
+    @contextmanager
+    def _mlflow_run_context(self, run_name: Optional[str] = None):
+        """
+        Context manager for MLflow runs to ensure proper cleanup.
 
-    Args:
-        params: Dictionary of parameters to log
-    """
-    mlflow.log_params(params)
+        Args:
+            run_name: Optional name for the run
+        """
+        try:
+            self.active_run = mlflow.start_run(
+                experiment_id=self.experiment_id,
+                run_name=run_name
+            )
+            self.run_id = self.active_run.info.run_id
+            yield self.active_run
+        except Exception as e:
+            print(f"Error in MLflow run: {str(e)}")
+            traceback.print_exc()
+            raise
+        finally:
+            if mlflow.active_run():
+                mlflow.end_run()
+                self.active_run = None
 
-def save_model(agent: A2CAgent, model_name: str, version: str) -> str:
-    """
-    Save trained model with versioning.
+    def log_metrics(self, metrics: Dict[str, float], step: int) -> None:
+        """
+        Log metrics to MLflow.
 
-    Args:
-        agent: Trained agent
-        model_name: Name of the model
-        version: Version of the model
+        Args:
+            metrics: Dictionary of metrics to log
+            step: Current training step
+        """
+        if mlflow.active_run():
+            mlflow.log_metrics(metrics, step=step)
+        else:
+            print("Warning: Attempted to log metrics without active run")
 
-    Returns:
-        model_path: Path to the saved model
-    """
-    # Create model directory with versioning
-    model_dir = os.path.join(MODEL_DIR, model_name, version)
-    os.makedirs(model_dir, exist_ok=True)
+    def log_parameters(self, params: Dict[str, Any]) -> None:
+        """
+        Log parameters to MLflow.
 
-    # Save model artifacts
-    model_path = os.path.join(model_dir, "model.h5")
-    agent.save(model_path)
+        Args:
+            params: Dictionary of parameters to log
+        """
+        if mlflow.active_run():
+            mlflow.log_params(params)
+        else:
+            print("Warning: Attempted to log parameters without active run")
 
-    # Log model to mlflow
-    mlflow.log_artifact(model_path)
+    def save_model(self, agent: A2CAgent, version: str) -> str:
+        """
+        Save trained model with versioning.
 
-    # Save model configuration
-    config_path = os.path.join(model_dir, "config.json")
-    with open(config_path, 'w') as f:
-        json.dump(agent.get_config(), f)
+        Args:
+            agent: Trained agent
+            version: Version of the model
 
-    mlflow.log_artifact(config_path)
+        Returns:
+            model_path: Path to the saved model
+        """
+        # Create model directory with versioning
+        model_dir = os.path.join(MODEL_DIR, self.model_name, version)
+        os.makedirs(model_dir, exist_ok=True)
 
-    return model_path
+        # Save model artifacts - use the model's save method
+        model_path = os.path.join(model_dir, "model")
+        agent.save(model_path)
 
-def evaluate_agent(agent: A2CAgent, env: MultiTickerPortfolioEnv,
-                  n_episodes: int = 5) -> Dict[str, float]:
-    """
-    Evaluate agent on test environment.
+        # Save environment configuration for reproducibility
+        env_config_path = os.path.join(model_dir, "env_config.json")
 
-    Args:
-        agent: Agent to evaluate
-        env: Test environment
-        n_episodes: Number of episodes to evaluate
+        # Get env_kwargs from agent using get_config to ensure we get the actual config used
+        config = agent.get_config()
+        env_kwargs = config.get('env_kwargs', {})
 
-    Returns:
-        metrics: Dictionary of evaluation metrics
-    """
-    total_rewards = []
-    portfolio_values = []
+        # Handle non-serializable objects in env_kwargs (like DataFrame)
+        serializable_env_kwargs = {}
+        for key, value in env_kwargs.items():
+            # Skip large/complex objects that shouldn't be serialized
+            if key == 'df':
+                # For DataFrame, just save metadata
+                if hasattr(value, 'shape'):
+                    serializable_env_kwargs[f"{key}_metadata"] = {
+                        'shape': list(value.shape),
+                        'columns': list(value.columns) if hasattr(value, 'columns') else None
+                    }
+            else:
+                # Try to serialize, skip if not serializable
+                try:
+                    json.dumps({key: value})
+                    serializable_env_kwargs[key] = value
+                except (TypeError, OverflowError):
+                    print(f"Warning: Could not serialize '{key}' in env_kwargs")
+                    serializable_env_kwargs[f"{key}_type"] = str(type(value))
 
-    for episode in range(n_episodes):
-        state = env.reset()
-        done = False
-        episode_reward = 0
+        with open(env_config_path, 'w') as f:
+            json.dump(serializable_env_kwargs, f)
 
-        while not done:
-            action = agent.act(state)
-            next_state, reward, done, info = env.step(action)
-            episode_reward += reward
-            state = next_state
+        # Log artifacts to MLflow if active run exists
+        if mlflow.active_run():
+            mlflow.log_artifact(f"{model_path}.zip")  # SB3 adds .zip extension
+            mlflow.log_artifact(env_config_path)
 
-            if done:
-                portfolio_values.append(info.get('portfolio_value', 0))
+            # Also log model configuration
+            model_config_path = os.path.join(model_dir, "model_config.json")
+            with open(model_config_path, 'w') as f:
+                # Save other configuration items except env_kwargs which we handled separately
+                serializable_config = {
+                    k: v for k, v in config.items()
+                    if k != 'env_kwargs' and json_serializable(v)
+                }
+                json.dump(serializable_config, f)
 
-        total_rewards.append(episode_reward)
+            mlflow.log_artifact(model_config_path)
 
-    # Calculate evaluation metrics
-    metrics = {
-        'mean_reward': np.mean(total_rewards),
-        'std_reward': np.std(total_rewards),
-        'max_reward': np.max(total_rewards),
-        'mean_portfolio_value': np.mean(portfolio_values),
-        'final_portfolio_value': portfolio_values[-1] if portfolio_values else 0
-    }
+        return model_path
 
-    return metrics
+    def evaluate_agent(self, agent: A2CAgent, env: MultiTickerPortfolioEnv,
+                     n_episodes: int = 5) -> Dict[str, float]:
+        """
+        Evaluate agent on test environment.
 
-def train_agent(
-    env_params: Dict[str, Any],
-    agent_params: Dict[str, Any],
-    training_params: Dict[str, Any],
-    experiment_name: str,
-    model_name: str,
-    version: Optional[str] = None
-) -> Tuple[A2CAgent, str]:
-    """
-    Train an agent with mlflow tracking.
+        Args:
+            agent: Agent to evaluate
+            env: Test environment
+            n_episodes: Number of episodes to evaluate
 
-    Args:
-        env_params: Parameters for environment creation
-        agent_params: Parameters for agent creation
-        training_params: Parameters for training process
-        experiment_name: Name of the experiment for mlflow
-        model_name: Name of the model for saving
-        version: Version string (defaults to timestamp if None)
+        Returns:
+            metrics: Dictionary of evaluation metrics
+        """
+        total_rewards = []
+        portfolio_values = []
 
-    Returns:
-        agent: Trained agent
-        model_path: Path to saved model
-    """
-    # Generate version if not provided
-    if version is None:
-        version = f"v_{int(time.time())}"
+        for episode in range(n_episodes):
+            # Handle gym vs gymnasium API differences
+            reset_result = env.reset()
+            if isinstance(reset_result, tuple):
+                # New Gymnasium API returns (obs, info)
+                state, _ = reset_result
+            else:
+                # Old Gym API just returns obs
+                state = reset_result
 
-    # Setup mlflow tracking
-    run_id = setup_mlflow(experiment_name)
+            done = False
+            episode_reward = 0
 
-    # Create environment
-    env = MultiTickerPortfolioEnv(**env_params)
+            while not done:
+                action = agent.predict(state, deterministic=True)
 
-    # Create evaluation environment (with different seed)
-    eval_env_params = env_params.copy()
-    eval_env_params['seed'] = env_params.get('seed', 42) + 100
-    eval_env = MultiTickerPortfolioEnv(**eval_env_params)
+                # Handle step return properly
+                step_result = env.step(action)
+                if len(step_result) == 4:
+                    # Old gym: next_state, reward, done, info
+                    next_state, reward, done, info = step_result
+                    truncated = False
+                else:
+                    # New gymnasium: next_state, reward, terminated, truncated, info
+                    next_state, reward, terminated, truncated, info = step_result
+                    done = terminated or truncated
 
-    # Get state dimensions from environment
-    state_dim = env.observation_space.shape[0]
-    action_dim = env.action_space.shape[0] if hasattr(env.action_space, 'shape') else env.action_space.n
+                episode_reward += reward
+                state = next_state
 
-    # Update agent params with state and action dimensions
-    agent_params.update({
-        'state_dim': state_dim,
-        'action_dim': action_dim
-    })
+                if done:
+                    portfolio_values.append(info.get('portfolio_value', 0))
 
-    # Create agent
-    agent = A2CAgent(**agent_params)
+            total_rewards.append(episode_reward)
 
-    # Extract training parameters
-    n_episodes = training_params.get('n_episodes', 1000)
-    max_steps = training_params.get('max_steps', 1000)
-    eval_frequency = training_params.get('eval_frequency', 50)
-
-    # Log all parameters
-    all_params = {
-        **env_params,
-        **agent_params,
-        **training_params,
-        'model_name': model_name,
-        'version': version
-    }
-    log_parameters(all_params)
-
-    # Training loop
-    total_steps = 0
-
-    for episode in range(n_episodes):
-        state = env.reset()
-        episode_reward = 0
-        done = False
-        step = 0
-
-        while not done and step < max_steps:
-            # Agent selects action
-            action = agent.act(state)
-
-            # Environment step
-            next_state, reward, done, info = env.step(action)
-
-            # Agent learns
-            agent.learn(state, action, reward, next_state, done)
-
-            # Update state and counters
-            state = next_state
-            episode_reward += reward
-            step += 1
-            total_steps += 1
-
-        # Log episode metrics
-        episode_metrics = {
-            'episode_reward': episode_reward,
-            'episode_length': step
+        # Calculate evaluation metrics
+        metrics = {
+            'mean_reward': np.mean(total_rewards),
+            'std_reward': np.std(total_rewards),
+            'max_reward': np.max(total_rewards),
+            'mean_portfolio_value': np.mean(portfolio_values),
+            'final_portfolio_value': portfolio_values[-1] if portfolio_values else 0
         }
 
-        if info:
-            for key, value in info.items():
-                if isinstance(value, (int, float)):
-                    episode_metrics[f'info_{key}'] = value
+        return metrics
 
-        log_metrics(episode_metrics, episode)
+    def train_agent(
+        self,
+        env_params: Dict[str, Any],
+        agent_params: Dict[str, Any],
+        training_params: Dict[str, Any],
+        version: Optional[str] = None,
+        run_name: Optional[str] = None
+    ) -> Tuple[A2CAgent, str]:
+        """
+        Train an agent with MLflow tracking using SB3's built-in functionality.
 
-        # Periodic evaluation
-        if episode % eval_frequency == 0 or episode == n_episodes - 1:
-            eval_metrics = evaluate_agent(agent, eval_env)
+        Args:
+            env_params: Parameters for environment creation
+            agent_params: Parameters for agent creation
+            training_params: Parameters for training process
+            version: Version string (defaults to timestamp if None)
+            run_name: Optional name for the MLflow run
 
-            # Add prefix to evaluation metrics
-            eval_metrics_prefixed = {f'eval_{k}': v for k, v in eval_metrics.items()}
-            log_metrics(eval_metrics_prefixed, episode)
+        Returns:
+            agent: Trained agent
+            model_path: Path to saved model
+        """
+        # Generate version if not provided
+        if version is None:
+            version = f"v_{int(time.time())}"
 
-            print(f"Episode {episode}/{n_episodes}: Reward={episode_reward:.2f}, "
-                  f"Eval Reward={eval_metrics['mean_reward']:.2f}")
+        # Log parameters
+        all_params = {
+            'model_name': self.model_name,
+            'version': version
+        }
 
-    # Save the trained model
-    model_path = save_model(agent, model_name, version)
+        # Add flattened parameters with prefixes
+        for prefix, param_dict in [
+            ('env_', env_params),
+            ('agent_', agent_params),
+            ('train_', training_params)
+        ]:
+            for k, v in param_dict.items():
+                try:
+                    # Only log serializable parameters
+                    json.dumps({k: v})
+                    all_params[f"{prefix}{k}"] = v
+                except (TypeError, OverflowError):
+                    pass  # Skip non-serializable values
 
-    # End mlflow run
-    mlflow.end_run()
+        try:
+            with self._mlflow_run_context(run_name):
+                # Log parameters
+                self.log_parameters(all_params)
 
-    return agent, model_path
+                # Extract training parameters
+                total_timesteps = training_params.get('n_episodes', 1000) * training_params.get('max_steps', 1000)
+                eval_freq = training_params.get('eval_frequency', 50) * 100  # Convert to steps
 
-def load_agent(model_name: str, version: str) -> A2CAgent:
-    """
-    Load a trained agent from disk.
+                # Create a single environment for evaluation
+                eval_env = MultiTickerPortfolioEnv(**env_params)
 
-    Args:
-        model_name: Name of the model
-        version: Version of the model
+                # Extract agent parameters
+                verbose = agent_params.pop('verbose', 0)
+                seed = agent_params.pop('seed', None)
 
-    Returns:
-        agent: Loaded agent
-    """
-    model_dir = os.path.join(MODEL_DIR, model_name, version)
+                # Create agent
+                structured_agent_params = {
+                    'env_kwargs': env_params,
+                    'model_kwargs': agent_params,
+                    'verbose': verbose,
+                    'seed': seed
+                }
 
-    # Load configuration
-    config_path = os.path.join(model_dir, "config.json")
-    with open(config_path, 'r') as f:
-        config = json.load(f)
+                # Create agent with its own vectorized environment
+                agent = A2CAgent(**structured_agent_params)
 
-    # Create agent with loaded configuration
-    agent = A2CAgent(**config)
+                # Import SB3 callbacks
+                from stable_baselines3.common.callbacks import CallbackList, EvalCallback
+                from stable_baselines3.common.vec_env import DummyVecEnv
 
-    # Load model weights
-    model_path = os.path.join(model_dir, "model.h5")
-    agent.load(model_path)
+                # Create a vectorized eval env for SB3's EvalCallback
+                eval_vec_env = DummyVecEnv([lambda: MultiTickerPortfolioEnv(**env_params)])
 
-    return agent
+                # Create SB3's built-in evaluation callback
+                eval_callback = EvalCallback(
+                    eval_vec_env,
+                    best_model_save_path=os.path.join(MODEL_DIR, self.model_name, f"{version}_best"),
+                    log_path=os.path.join(RUNS_DIR, self.model_name),
+                    eval_freq=eval_freq,
+                    deterministic=True,
+                    render=False,
+                    verbose=1
+                )
 
-def get_model_versions(model_name: str) -> List[str]:
-    """
-    Get list of available versions for a model.
+                # Combine callbacks
+                callback = eval_callback
 
-    Args:
-        model_name: Name of the model
+                # Train the agent
+                print(f"Starting training for {total_timesteps} total steps")
+                agent.train(
+                    total_timesteps=total_timesteps,
+                    callback=callback,
+                    log_interval=max(1, total_timesteps // 20)  # Print ~20 logs during training
+                )
 
-    Returns:
-        versions: List of available versions
-    """
-    model_dir = os.path.join(MODEL_DIR, model_name)
+                # Save the final model
+                model_path = os.path.join(MODEL_DIR, self.model_name, version, "final_model")
+                os.makedirs(os.path.dirname(model_path), exist_ok=True)
+                agent.save(model_path)
 
-    if not os.path.exists(model_dir):
-        return []
+                # Log the final model
+                mlflow.log_artifact(f"{model_path}.zip")
 
-    versions = [d for d in os.listdir(model_dir)
-                if os.path.isdir(os.path.join(model_dir, d))]
+                return agent, model_path
 
-    return sorted(versions)
+        except Exception as e:
+            print(f"Error during training: {str(e)}")
+            traceback.print_exc()
+            raise
 
-def delete_model(model_name: str, version: Optional[str] = None) -> None:
-    """
-    Delete a model version or all versions of a model.
+    def load_agent(self, version: str) -> A2CAgent:
+        """
+        Load a trained agent from disk.
 
-    Args:
-        model_name: Name of the model
-        version: Specific version to delete (if None, deletes all versions)
-    """
-    model_dir = os.path.join(MODEL_DIR, model_name)
+        Args:
+            version: Version of the model
 
-    if not os.path.exists(model_dir):
-        print(f"Model {model_name} does not exist.")
-        return
+        Returns:
+            agent: Loaded agent
+        """
+        model_dir = os.path.join(MODEL_DIR, self.model_name, version)
 
-    if version is None:
-        # Delete entire model directory
-        shutil.rmtree(model_dir)
-        print(f"Deleted all versions of model {model_name}.")
-    else:
-        # Delete specific version
-        version_dir = os.path.join(model_dir, version)
+        # Check if model directory exists
+        if not os.path.exists(model_dir):
+            raise FileNotFoundError(f"Model version {version} not found at {model_dir}")
+
+        # Load environment configuration
+        env_config_path = os.path.join(model_dir, "env_config.json")
+
+        # If serialized config exists, load it
+        if os.path.exists(env_config_path):
+            with open(env_config_path, 'r') as f:
+                serialized_env_kwargs = json.load(f)
+
+            # Reconstruct env_kwargs - this is partial, the DataFrame needs to be provided again
+            env_kwargs = serialized_env_kwargs
+
+            # Check for metadata on skipped objects
+            if 'df_metadata' in env_kwargs:
+                print("DataFrame metadata found but actual data needs to be provided again.")
+                print(f"Expected DataFrame with shape: {env_kwargs['df_metadata'].get('shape')}")
+                print(f"And columns: {env_kwargs['df_metadata'].get('columns')}")
+
+                # Remove the metadata to avoid confusion
+                env_kwargs.pop('df_metadata', None)
+        else:
+            # No config available, will need to provide it
+            print("Warning: No environment configuration found. You'll need to provide all parameters.")
+            env_kwargs = {}
+
+        # Check if model file exists
+        model_path = os.path.join(model_dir, "model.zip")
+        if not os.path.exists(model_path):
+            model_path = os.path.join(model_dir, "model")  # Try without .zip
+            if not os.path.exists(model_path + ".zip"):
+                raise FileNotFoundError(f"Model file not found at {model_path}.zip")
+
+        # Use the A2CAgent.load class method to load the agent
+        try:
+            agent = A2CAgent.load(
+                path=model_path,
+                env_kwargs=env_kwargs
+            )
+            return agent
+        except Exception as e:
+            print(f"Error loading model: {str(e)}")
+            print("You may need to provide the correct environment parameters manually.")
+            traceback.print_exc()
+            raise
+
+    def get_model_versions(self) -> List[str]:
+        """
+        Get list of available versions for this model.
+
+        Returns:
+            versions: List of available versions
+        """
+        model_dir = os.path.join(MODEL_DIR, self.model_name)
+
+        if not os.path.exists(model_dir):
+            return []
+
+        versions = [d for d in os.listdir(model_dir)
+                    if os.path.isdir(os.path.join(model_dir, d))]
+
+        return sorted(versions)
+
+    def delete_model_version(self, version: str) -> bool:
+        """
+        Delete a specific version of this model.
+
+        Args:
+            version: Specific version to delete
+
+        Returns:
+            success: Whether deletion was successful
+        """
+        version_dir = os.path.join(MODEL_DIR, self.model_name, version)
         if os.path.exists(version_dir):
             shutil.rmtree(version_dir)
-            print(f"Deleted version {version} of model {model_name}.")
+            print(f"Deleted version {version} of model {self.model_name}.")
+            return True
         else:
-            print(f"Version {version} of model {model_name} does not exist.")
+            print(f"Version {version} of model {self.model_name} does not exist.")
+            return False
+
+    def delete_all_versions(self) -> bool:
+        """
+        Delete all versions of this model.
+
+        Returns:
+            success: Whether deletion was successful
+        """
+        model_dir = os.path.join(MODEL_DIR, self.model_name)
+
+        if not os.path.exists(model_dir):
+            print(f"Model {self.model_name} does not exist.")
+            return False
+
+        # Delete entire model directory
+        shutil.rmtree(model_dir)
+        print(f"Deleted all versions of model {self.model_name}.")
+        return True

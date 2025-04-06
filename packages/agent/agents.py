@@ -7,8 +7,9 @@ from stable_baselines3 import A2C
 from stable_baselines3.common.env_util import make_vec_env
 from packages.agent.custom_envs import MultiTickerPortfolioEnv
 from stable_baselines3.common.vec_env import VecEnv
-from typing import Optional, Dict, Any, Type
+from typing import Optional, Dict, Any, Type, Union, Tuple
 import os
+import numpy as np
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -63,7 +64,7 @@ class A2CAgent:
         # Use make_vec_env to automatically wrap the environment
         env = make_vec_env(
             lambda: MultiTickerPortfolioEnv(**self.env_kwargs),
-            n_envs=12,
+            n_envs=12,  # Use 12 parallel environments
             seed=self.seed
         )
         return env
@@ -71,8 +72,8 @@ class A2CAgent:
     def train(
         self,
         total_timesteps: int,
-        log_interval: int = 1,
-        callback: Optional[Any] = None,
+        callback=None,
+        log_interval: int = 100,
         tb_log_name: str = "A2C"
     ):
         """
@@ -80,18 +81,21 @@ class A2CAgent:
 
         Args:
             total_timesteps (int): The total number of samples (env steps) to train on.
-            log_interval (int): The number of episodes between logging.
-            callback (callable, optional): Callback function for monitoring training.
-            tb_log_name (str): The name of the run for logging.
+            callback: Callback for monitoring training. Either a single callable or a list of callbacks.
+            log_interval (int): The number of timesteps between logging.
+            tb_log_name (str): The name of the run for TensorBoard logging.
         """
         logger.info(f"Starting A2C training for {total_timesteps} timesteps...")
+
+        # Call the SB3 learn method with the parameters
         self.model.learn(
             total_timesteps=total_timesteps,
-            log_interval=log_interval,
             callback=callback,
+            log_interval=log_interval,
             tb_log_name=tb_log_name,
-            reset_num_timesteps=False # Allow continued training
+            reset_num_timesteps=False  # Allow continued training
         )
+
         logger.info("A2C training finished.")
 
     def predict(self, observation: Any, deterministic: bool = True) -> Any:
@@ -105,8 +109,30 @@ class A2CAgent:
         Returns:
             The action chosen by the agent.
         """
-        action, _states = self.model.predict(observation, deterministic=deterministic)
-        return action
+        # Handle single observations (not vectorized)
+        if not isinstance(observation, np.ndarray) or len(observation.shape) == 1:
+            # Convert to batch of 1 and squeeze the result
+            observation = np.array([observation])
+            action, _states = self.model.predict(observation, deterministic=deterministic)
+            return action[0]
+        else:
+            # Already batched
+            action, _states = self.model.predict(observation, deterministic=deterministic)
+            return action
+
+    def get_config(self) -> Dict[str, Any]:
+        """
+        Get the configuration of the agent.
+
+        Returns:
+            Dict containing the agent's configuration.
+        """
+        return {
+            'env_kwargs': self.env_kwargs,
+            'model_kwargs': self.model_kwargs,
+            'verbose': self.verbose,
+            'seed': self.seed
+        }
 
     def save(self, path: str):
         """
@@ -118,7 +144,7 @@ class A2CAgent:
         """
         os.makedirs(os.path.dirname(path), exist_ok=True)
         self.model.save(path)
-        logger.info(f"A2C model saved to {path}.zip")
+        logger.info(f"A2C model saved to {path}")
 
     @classmethod
     def load(
@@ -144,7 +170,7 @@ class A2CAgent:
 
         # Load the A2C model
         loaded_a2c = A2C.load(path, env=temp_env, device=device)
-        logger.info(f"A2C model loaded from {path}.zip")
+        logger.info(f"A2C model loaded from {path}")
 
         # Create a new A2CAgent instance but replace the model and env
         agent_instance = cls(env_kwargs=env_kwargs) # env_kwargs needed for init
