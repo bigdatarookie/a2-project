@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     libfreetype6-dev \
     libpng-dev \
+    swig \
     && rm -rf /var/lib/apt/lists/*
 RUN pip install --user -r requirements.txt \
     && pip install --user jupyter \

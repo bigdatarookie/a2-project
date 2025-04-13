@@ -14,7 +14,10 @@ services:
     env_file:
       - .env
     restart: "no"
-    cpus: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '10.0'
 
 volumes:
   a1-data:
