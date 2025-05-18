@@ -44,6 +44,7 @@ torch.backends.cudnn.benchmark = True
 # %%
 # Set MLFlow tracking URI
 os.environ["MLFLOW_TRACKING_URI"] = "file:///app/data/models/mlflow_experiments"
+
 mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
 
 # Create experiment
@@ -100,7 +101,7 @@ with mlflow.start_run(experiment_id=experiment_id, run_name="a2c_training") as r
     os.makedirs(log_dir, exist_ok=True)
 
     # A2C hyperparameters
-    total_timesteps = 1000000
+    total_timesteps = 500000
     learning_rate = 0.001
     n_steps = 12
     gamma = 0.99
@@ -110,7 +111,7 @@ with mlflow.start_run(experiment_id=experiment_id, run_name="a2c_training") as r
     max_grad_norm = 0.5
     verbose = 1  # Set to verbose mode to get more detailed logs
 
-    # Optimize batch size for better CPU utilization
+    # Policy network architecture
     policy_kwargs = dict(
         net_arch=[64, 64],
         activation_fn=torch.nn.ReLU,
@@ -139,7 +140,7 @@ with mlflow.start_run(experiment_id=experiment_id, run_name="a2c_training") as r
         eval_env,
         best_model_save_path=best_model_dir,
         log_path=log_dir,
-        eval_freq=50000,
+        eval_freq=100000,
         deterministic=True,
         render=False
     )
