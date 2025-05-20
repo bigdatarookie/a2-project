@@ -5,12 +5,7 @@ import pandas as pd
 import os
 import io
 import glob
-import matplotlib.pyplot as plt
-from matplotlib.figure import Figure
-from IPython.display import clear_output, display, HTML, display_html, Video
-from PIL import Image
 from gymnasium.spaces import Box, Discrete
-from gymnasium.wrappers import RecordVideo
 from stable_baselines3 import A2C
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.evaluation import evaluate_policy
@@ -124,9 +119,6 @@ if __name__ == '__main__':
     except:
         experiment_id = mlflow.create_experiment(ExpConf.EXPERIMENT_NAME)
         print(f"Created new experiment with id: {experiment_id}")
-
-    # multiprocess environment
-    # env = SubprocVecEnv([lambda: gym.make(ExpConf.ENV_ID) for i in range(ExpConf.NUM_THREADS)])
 
     # Run training and evaluation with MLFlow logging
     with mlflow.start_run(experiment_id=experiment_id, run_name="a2c_training") as run:

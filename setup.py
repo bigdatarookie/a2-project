@@ -1,5 +1,5 @@
 """
-Setup script for the Tdata package.
+Setup scripts for the A2-project.
 """
 
 from setuptools import setup, find_namespace_packages
@@ -39,4 +39,13 @@ setup(
         "Programming Language :: Python :: 3.11",
         "Topic :: Office/Business :: Financial :: Investment",
     ],
+)
+setup(
+    name="agent",
+    version="0.1.0",
+    description="RL agents for different tasks",
+    author="",
+    author_email="",
+    package_dir={"": "packages"},
+    packages=find_namespace_packages(where="packages"),
 )
