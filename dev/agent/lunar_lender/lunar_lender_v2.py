@@ -253,7 +253,7 @@ def record_episode(model, run_artifact_dir, env=None, episode_num=None):
 
 # %%
 # Run evaluation from best_model_dir and record all episodes
-run_dir = f"/app/data/models/mlflow_experiments/801041038088922725/cb18949c2023482c9f6d54d202fbdb7d/artifacts"
+run_dir = f"/app/data/models/mlflow_experiments/801041038088922725/d40e5091bccb4395a30060b8d437d4c4/artifacts"
 # run_dir = run_artifact_dir
 # Create environment with render mode for recording
 eval_env = gym.make("LunarLander-v2", render_mode="rgb_array")
@@ -295,7 +295,7 @@ print(summary_df.to_string(index=False))
 
 # %%
 # Display the selected episode's recording
-episode_to_show = 2
+episode_to_show = 6
 
 video_path = glob.glob(f"{run_dir}/recordings/*episode_{episode_to_show-1}*.mp4")[0]
 display(Video(video_path, embed=True, width=800, height=600))

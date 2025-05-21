@@ -8,6 +8,8 @@ import glob
 import argparse
 import time
 import sys
+import yaml
+from pathlib import Path
 from gymnasium.spaces import Box, Discrete
 from stable_baselines3 import A2C
 from stable_baselines3.common.env_util import make_vec_env
@@ -108,77 +110,100 @@ def train_from_dict(exp_conf: Dict[str, Any]) -> str:
         experiment_id = mlflow.create_experiment(exp_conf["EXPERIMENT_NAME"])
         print(f"Created new experiment with id: {experiment_id}")
 
+    # Resources to clean up
+    train_env = None
+    eval_env = None
+    model = None
+
     # Run training and evaluation with MLFlow logging
     with mlflow.start_run(experiment_id=experiment_id, run_name="a2c_training") as run:
-        run_id = run.info.run_id
-        mlflow.log_params(exp_conf)
+        try:
+            run_id = run.info.run_id
+            mlflow.log_params(exp_conf)
 
-        # Create directories
-        run_artifact_dir = f"/app/data/models/mlflow_experiments/{experiment_id}/{run_id}/artifacts"
-        os.makedirs(run_artifact_dir, exist_ok=True)
-        best_model_dir = f"{run_artifact_dir}/best_model"
-        final_model_dir = f"{run_artifact_dir}/final_model"
-        log_dir = f"{run_artifact_dir}/logs"  # Directory for logs and plots
-        os.makedirs(log_dir, exist_ok=True)
+            # Create directories
+            run_artifact_dir = f"/app/data/models/mlflow_experiments/{experiment_id}/{run_id}/artifacts"
+            os.makedirs(run_artifact_dir, exist_ok=True)
+            best_model_dir = f"{run_artifact_dir}/best_model"
+            final_model_dir = f"{run_artifact_dir}/final_model"
+            log_dir = f"{run_artifact_dir}/logs"  # Directory for logs and plots
+            os.makedirs(log_dir, exist_ok=True)
 
 
-        # Create environments
-        train_env = make_vec_env(exp_conf["ENV_ID"], n_envs=exp_conf["NUM_THREADS"], seed=exp_conf["SEED"], vec_env_cls=SubprocVecEnv)
-        eval_env = Monitor(gym.make(exp_conf["ENV_ID"]))
+            # Create environments
+            train_env = make_vec_env(exp_conf["ENV_ID"], n_envs=exp_conf["NUM_THREADS"], seed=exp_conf["SEED"], vec_env_cls=SubprocVecEnv)
+            eval_env = Monitor(gym.make(exp_conf["ENV_ID"]))
 
-        # Setup callbacks
-        eval_callback = EvalCallback(
-            eval_env,
-            best_model_save_path=run_artifact_dir,
-            log_path=log_dir,
-            eval_freq=5000,
-            deterministic=True,
-            render=False
-        )
+            # Setup callbacks
+            eval_callback = EvalCallback(
+                eval_env,
+                best_model_save_path=run_artifact_dir,
+                log_path=log_dir,
+                eval_freq=5000,
+                deterministic=True,
+                render=False
+            )
 
-        # Add visualization callback
-        vis_callback = TrainingVisualizationCallback(
-            log_dir=log_dir,
-            window_size=100,
-            plot_freq=5000
-        )
+            # Add visualization callback
+            vis_callback = TrainingVisualizationCallback(
+                log_dir=log_dir,
+                window_size=100,
+                plot_freq=5000
+            )
 
-        # Create model with custom MLFlow logger
-        model = A2C(
-            exp_conf["POLICY"],
-            train_env,
-            learning_rate=exp_conf["LEARNING_RATE"],
-            n_steps=exp_conf["N_STEPS"],
-            gamma=exp_conf["GAMMA"],
-            gae_lambda=exp_conf["GAE_LAMBDA"],
-            ent_coef=exp_conf["ENT_COEF"]
-        )
+            # Create model with custom MLFlow logger
+            if exp_conf["MODEL_ID"] == "A2C" :
+                model = A2C(
+                    exp_conf["POLICY"],
+                    train_env,
+                    learning_rate=exp_conf["LEARNING_RATE"],
+                    n_steps=exp_conf["N_STEPS"],
+                    gamma=exp_conf["GAMMA"],
+                    gae_lambda=exp_conf["GAE_LAMBDA"],
+                    ent_coef=exp_conf["ENT_COEF"],
+                    vf_coef=exp_conf.get("VF_COEF", 0.5),  # Default if not in config
+                    max_grad_norm=exp_conf.get("MAX_GRAD_NORM", 0.5),  # Default if not in config
+                    normalize_advantage=exp_conf.get("NORMALIZE_ADVANTAGE", True), # Default if not in config
+                    policy_kwargs=exp_conf.get("POLICY_KWARGS", None) # Default if not in config
+                )
+            else :
+                raise ValueError(f"Model {exp_conf['MODEL_ID']} not supported")
 
-        # Set custom logger for MLFlow integration
-        loggers = Logger(
-            folder=None, # No disk logging from here, MLflow handles it
-            output_formats=[MLflowOutputFormat()], # Only MLflow for console/programmatic output
-        )
-        model.set_logger(loggers)
+            # Set custom logger for MLFlow integration
+            loggers = Logger(
+                folder=None, # No disk logging from here, MLflow handles it
+                output_formats=[MLflowOutputFormat()], # Only MLflow for console/programmatic output
+            )
+            model.set_logger(loggers)
 
-        # Train model with both callbacks
-        print("Starting training")
-        model.learn(
-            total_timesteps=exp_conf["TOTAL_TIMESTEPS"],
-            callback=[eval_callback, vis_callback]
-        )
+            # Train model with both callbacks
+            print("Starting training")
+            model.learn(
+                total_timesteps=exp_conf["TOTAL_TIMESTEPS"],
+                callback=[eval_callback, vis_callback]
+            )
 
-        # Save model and log it to MLFlow
-        model.save(final_model_dir)
-        # Final evaluation
-        print("\nPerforming final evaluation...")
-        mean_reward, std_reward = evaluate_policy(model, eval_env, n_eval_episodes=10, render=False)
-        mlflow.log_metrics({
-            "final_mean_reward": mean_reward,
-            "final_std_reward": std_reward
-        })
+            # Save model and log it to MLFlow
+            model.save(final_model_dir)
+            # Final evaluation
+            print("\nPerforming final evaluation...")
+            mean_reward, std_reward = evaluate_policy(model, eval_env, n_eval_episodes=10, render=False)
+            mlflow.log_metrics({
+                "final_mean_reward": mean_reward,
+                "final_std_reward": std_reward
+            })
 
-        print(f"\nTraining complete!")
-        print(f"Final mean reward: {mean_reward:.2f} +/- {std_reward:.2f}")
+            print(f"\nTraining complete!")
+            print(f"Final mean reward: {mean_reward:.2f} +/- {std_reward:.2f}")
 
-        return str(run_artifact_dir)
+            return str(run_artifact_dir)
+        finally:
+            # Clean up resources
+            print("Cleaning up resources...")
+            if train_env is not None:
+                train_env.close()
+            if eval_env is not None:
+                eval_env.close()
+            # Free model resources if needed
+            if model is not None:
+                del model
