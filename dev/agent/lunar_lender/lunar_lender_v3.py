@@ -32,6 +32,7 @@ from typing import Any, Dict, Tuple, Union
 from contextlib import redirect_stdout
 from agent import train_from_config, train_from_dict
 
+
 # %%
 # Create and display episode recording function
 def record_episode(model, run_artifact_dir, env=None, episode_num=None):
@@ -72,7 +73,7 @@ def record_episode(model, run_artifact_dir, env=None, episode_num=None):
 
 # %%
 # Run evaluation from best_model_dir and record all episodes
-run_dir = f"/app/data/models/mlflow_experiments/801041038088922725/52827a9397724e9692d8b0f2b4d46932/artifacts"
+run_dir = f"/app/data/models/mlflow_experiments/510490392254633461/6972475dd7cd452ab9566b247002c2b7/artifacts"
 # run_dir = run_artifact_dir
 # Create environment with render mode for recording
 eval_env = gym.make("LunarLander-v2", render_mode="rgb_array")
@@ -114,7 +115,7 @@ print(summary_df.to_string(index=False))
 
 # %%
 # Display the selected episode's recording
-episode_to_show = 1
+episode_to_show = 9
 
 video_path = glob.glob(f"{run_dir}/recordings/*episode_{episode_to_show-1}*.mp4")[0]
 display(Video(video_path, embed=True, width=800, height=600))

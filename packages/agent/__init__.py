@@ -15,8 +15,8 @@ Usage:
 __version__ = '0.1.0'
 
 # Import main functionality for easier access
-from packages.agent.a2c_trainer import train_from_config
-from packages.agent.a2c_trainer import train_from_dict
+from packages.agent.trainer import train_from_config
+from packages.agent.trainer import train_from_dict
 
 # Define public API
 __all__ = [
