@@ -33,6 +33,18 @@ from contextlib import redirect_stdout
 from agent import train_from_config, train_from_dict
 
 
+
+# %%
+config = "lunar_lender_v3"
+config_path = f"/app/data/configs/manual/{config}.yml"
+train_from_config(config_path)
+
+"""
+or
+docker exec -it 1f6782216a4a python3 -m agent --config lunar_lender_v3
+for parallel processing
+"""
+
 # %%
 # Create and display episode recording function
 def record_episode(model, run_artifact_dir, env=None, episode_num=None):
@@ -121,3 +133,4 @@ video_path = glob.glob(f"{run_dir}/recordings/*episode_{episode_to_show-1}*.mp4"
 display(Video(video_path, embed=True, width=800, height=600))
 print(f"Episode {episode_to_show} reward: {episode_rewards[episode_to_show-1]:.2f}")
 print(f"Episode {episode_to_show} length: {episode_lengths[episode_to_show-1]}")
+

@@ -190,6 +190,31 @@ def train_from_dict(exp_conf: Dict[str, Any]) -> str:
                     policy_kwargs=exp_conf.get("POLICY_KWARGS", None),
                     seed=exp_conf.get("SEED", None)
                 )
+            elif exp_conf["MODEL_ID"] == "SAC" :
+                model = SAC(
+                    exp_conf["POLICY"],
+                    train_env,
+                    learning_rate=exp_conf["LEARNING_RATE"],
+                    buffer_size=exp_conf["BUFFER_SIZE"],
+                    n_steps=exp_conf["N_STEPS"],
+                    batch_size=exp_conf["BATCH_SIZE"],
+                    n_epochs=exp_conf.get("N_EPOCHS", 10),
+                    gamma=exp_conf["GAMMA"],
+                    gae_lambda=exp_conf["GAE_LAMBDA"],
+                    clip_range=exp_conf.get("CLIP_RANGE", 0.2),
+                    clip_range_vf=exp_conf.get("CLIP_RANGE_VF", None),
+                    normalize_advantage=exp_conf.get("NORMALIZE_ADVANTAGE", True),
+                    ent_coef=exp_conf["ENT_COEF"],
+                    vf_coef=exp_conf["VF_COEF"],
+                    max_grad_norm=exp_conf.get("MAX_GRAD_NORM", 0.5),
+                    use_sde=exp_conf.get("USE_SDE", False),
+                    sde_sample_freq=exp_conf.get("SDE_SAMPLE_FREQ", -1),
+                    rollout_buffer_class=exp_conf.get("ROLLOUT_BUFFER_CLASS", None),
+                    rollout_buffer_kwargs=exp_conf.get("ROLLOUT_BUFFER_KWARGS", None),
+                    target_kl=exp_conf.get("TARGET_KL", None),
+                    policy_kwargs=exp_conf.get("POLICY_KWARGS", None),
+                    seed=exp_conf.get("SEED", None)
+                )
             else :
                 raise ValueError(f"Model {exp_conf['MODEL_ID']} not supported")
 

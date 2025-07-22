@@ -28,6 +28,8 @@ PyPortfolioOpt>=1.5.0,<2.0.0
 # utilities
 requests>=2.31.0,<3.0.0
 beautifulsoup4>=4.12.0,<5.0.0
+typing_extensions
+
 # yfinance>=0.2.0,<0.3.0  # Latest with better error handling
 tinkoff-investments  # Keep as is for API compatibility
 grpcio>=1.54.0,<2.0.0
