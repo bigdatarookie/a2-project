@@ -11,7 +11,7 @@ import sys
 import yaml
 from pathlib import Path
 from gymnasium.spaces import Box, Discrete
-from stable_baselines3 import A2C, PPO
+from stable_baselines3 import A2C, PPO, SAC
 from stable_baselines3.common.env_util import make_vec_env
 from stable_baselines3.common.evaluation import evaluate_policy
 from stable_baselines3.common.monitor import Monitor
@@ -129,7 +129,6 @@ def train_from_dict(exp_conf: Dict[str, Any]) -> str:
             log_dir = f"{run_artifact_dir}/logs"  # Directory for logs and plots
             os.makedirs(log_dir, exist_ok=True)
 
-
             # Create environments
             train_env = make_vec_env(exp_conf["ENV_ID"], n_envs=exp_conf["NUM_THREADS"], seed=exp_conf["SEED"], vec_env_cls=SubprocVecEnv)
             eval_env = Monitor(gym.make(exp_conf["ENV_ID"]))
@@ -194,26 +193,28 @@ def train_from_dict(exp_conf: Dict[str, Any]) -> str:
                 model = SAC(
                     exp_conf["POLICY"],
                     train_env,
-                    learning_rate=exp_conf["LEARNING_RATE"],
-                    buffer_size=exp_conf["BUFFER_SIZE"],
-                    n_steps=exp_conf["N_STEPS"],
-                    batch_size=exp_conf["BATCH_SIZE"],
-                    n_epochs=exp_conf.get("N_EPOCHS", 10),
-                    gamma=exp_conf["GAMMA"],
-                    gae_lambda=exp_conf["GAE_LAMBDA"],
-                    clip_range=exp_conf.get("CLIP_RANGE", 0.2),
-                    clip_range_vf=exp_conf.get("CLIP_RANGE_VF", None),
-                    normalize_advantage=exp_conf.get("NORMALIZE_ADVANTAGE", True),
-                    ent_coef=exp_conf["ENT_COEF"],
-                    vf_coef=exp_conf["VF_COEF"],
-                    max_grad_norm=exp_conf.get("MAX_GRAD_NORM", 0.5),
+                    learning_rate=exp_conf.get("LEARNING_RATE", 0.0003),
+                    buffer_size=exp_conf.get("BUFFER_SIZE", 1000000),
+                    learning_starts=exp_conf.get("LEARNING_STARTS", 100),
+                    batch_size=exp_conf.get("BATCH_SIZE", 256),
+                    tau=exp_conf.get("TAU", 0.005),
+                    gamma=exp_conf.get("GAMMA", 0.99),
+                    train_freq=exp_conf.get("TRAIN_FREQ", 1),
+                    gradient_steps=exp_conf.get("GRADIENT_STEPS", 1),
+                    action_noise=exp_conf.get("ACTION_NOISE", None),
+                    replay_buffer_class=exp_conf.get("REPLAY_BUFFER_CLASS", None),
+                    replay_buffer_kwargs=exp_conf.get("REPLAY_BUFFER_KWARGS", None),
+                    optimize_memory_usage=exp_conf.get("OPTIMIZE_MEMORY_USAGE", False),
+                    ent_coef=exp_conf.get("ENT_COEF", "auto"),
+                    target_update_interval=exp_conf.get("TARGET_UPDATE_INTERVAL", 1),
+                    target_entropy=exp_conf.get("TARGET_ENTROPY", "auto"),
                     use_sde=exp_conf.get("USE_SDE", False),
                     sde_sample_freq=exp_conf.get("SDE_SAMPLE_FREQ", -1),
-                    rollout_buffer_class=exp_conf.get("ROLLOUT_BUFFER_CLASS", None),
-                    rollout_buffer_kwargs=exp_conf.get("ROLLOUT_BUFFER_KWARGS", None),
-                    target_kl=exp_conf.get("TARGET_KL", None),
+                    use_sde_at_warmup=exp_conf.get("USE_SDE_AT_WARMUP", False),
                     policy_kwargs=exp_conf.get("POLICY_KWARGS", None),
-                    seed=exp_conf.get("SEED", None)
+                    seed=exp_conf.get("SEED", None),
+                    device=exp_conf.get("DEVICE", "auto"),
+                    _init_setup_model=exp_conf.get("_INIT_SETUP_MODEL", True)
                 )
             else :
                 raise ValueError(f"Model {exp_conf['MODEL_ID']} not supported")
