@@ -17,6 +17,7 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     Args:
         df: DataFrame with OHLCV data. Must contain 'high', 'low', 'close', 'volume', 'date' columns.
+          If 'tic' column is present, indicators will be calculated per ticker.
           Column names are case-insensitive.
 
     Returns:
@@ -36,87 +37,112 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
         if col not in df.columns:
             raise ValueError(f"Required column '{col}' not found in DataFrame")
 
-    # Check if we have enough data
-    if len(df) < 100:  # Minimum required for longest indicator
-        logger.warning(f"Not enough data points ({len(df)}) for calculating all indicators")
-        # Return the original DataFrame to avoid errors, with NaN indicator columns
-        for indicator in ['rsi', 'macd_line', 'macd_signal', 'macd_histogram',
-                         'sma_12', 'sma_26', 'sma_50', 'sma_100', 'atr',
-                         'bb_lower', 'bb_middle', 'bb_upper', 'vwap',
-                         'adx', 'adx_positive', 'adx_negative', 'stoch_k', 'stoch_d', 'obv']:
-            df[indicator] = np.nan
-        return df
+    def calculate_single_df(data: pd.DataFrame) -> pd.DataFrame:
+        """Helper function to calculate indicators for a single DataFrame"""
+        try:
+            # Sort by date and set index
+            data = data.sort_values('date').set_index('date')
+            
+            # RSI
+            rsi = ta.rsi(data['close'], length=14)
+            data['rsi'] = rsi if rsi is not None else np.nan
+            
+            # MACD
+            macd = ta.macd(data['close'], fast=12, slow=26, signal=9)
+            if isinstance(macd, pd.DataFrame):
+                data['macd_line'] = macd.get('MACD_12_26_9', np.nan)
+                data['macd_signal'] = macd.get('MACDs_12_26_9', np.nan)
+                data['macd_histogram'] = macd.get('MACDh_12_26_9', np.nan)
+            else:
+                data['macd_line'] = data['macd_signal'] = data['macd_histogram'] = np.nan
+            
+            # Moving Averages
+            data['sma_12'] = ta.sma(data['close'], length=12)
+            data['sma_26'] = ta.sma(data['close'], length=26)
+            data['sma_50'] = ta.sma(data['close'], length=50)
+            data['sma_100'] = ta.sma(data['close'], length=100)
+            
+            # ATR
+            data['atr'] = ta.atr(data['high'], data['low'], data['close'], length=14)
+            
+            # Bollinger Bands
+            bb = ta.bbands(data['close'], length=20, std=2)
+            if isinstance(bb, pd.DataFrame):
+                data['bb_lower'] = bb['BBL_20_2.0']
+                data['bb_middle'] = bb['BBM_20_2.0']
+                data['bb_upper'] = bb['BBU_20_2.0']
+            else:
+                data['bb_lower'] = data['bb_middle'] = data['bb_upper'] = np.nan
+            
+            # VWAP
+            data['vwap'] = ta.vwap(data['high'], data['low'], data['close'], data['volume'])
+            
+            # ADX
+            adx = ta.adx(data['high'], data['low'], data['close'], length=14)
+            if isinstance(adx, pd.DataFrame):
+                data['adx'] = adx['ADX_14']
+                data['adx_positive'] = adx['DMP_14']
+                data['adx_negative'] = adx['DMN_14']
+            else:
+                data['adx'] = data['adx_positive'] = data['adx_negative'] = np.nan
+            
+            # Stochastic
+            stoch = ta.stoch(data['high'], data['low'], data['close'], k=14, d=3, smooth_k=3)
+            if isinstance(stoch, pd.DataFrame):
+                data['stoch_k'] = stoch['STOCHk_14_3_3']
+                data['stoch_d'] = stoch['STOCHd_14_3_3']
+            else:
+                data['stoch_k'] = data['stoch_d'] = np.nan
+            
+            # OBV
+            data['obv'] = ta.obv(data['close'], data['volume'])
+            
+            # Reset index to get date back as column
+            return data.reset_index()
+            
+        except Exception as e:
+            logger.error(f"Error calculating indicators: {str(e)}")
+            # Add NaN columns for all indicators
+            for col in ['rsi', 'macd_line', 'macd_signal', 'macd_histogram',
+                       'sma_12', 'sma_26', 'sma_50', 'sma_100', 'atr',
+                       'bb_lower', 'bb_middle', 'bb_upper', 'vwap',
+                       'adx', 'adx_positive', 'adx_negative', 
+                       'stoch_k', 'stoch_d', 'obv']:
+                data[col] = np.nan
+            return data.reset_index() if isinstance(data.index, pd.DatetimeIndex) else data
 
-    # Sort by 'date' to ensure chronological order
-    df = df.sort_values('date')
-
-    # Set 'date' as DatetimeIndex for indicator calculation
-    df = df.set_index('date')
-
-    try:
-        # Calculate technical indicators with error checking
-
-        # Relative Strength Index
-        rsi = ta.rsi(df['close'], length=14)
-        if rsi is not None:
-            df['rsi'] = rsi
+    # Process data based on whether it contains multiple tickers
+    if 'tic' in df.columns:
+        # Multi-ticker case
+        result_dfs = []
+        for ticker in df['tic'].unique():
+            ticker_data = df[df['tic'] == ticker].copy()
+            if len(ticker_data) < 100:
+                logger.warning(f"Not enough data points ({len(ticker_data)}) for ticker {ticker}")
+                continue
+            try:
+                processed_df = calculate_single_df(ticker_data)
+                result_dfs.append(processed_df)
+                logger.info(f"Successfully processed ticker {ticker}")
+            except Exception as e:
+                logger.error(f"Error processing ticker {ticker}: {str(e)}")
+                continue
+        
+        if result_dfs:
+            logger.info(f"Successfully processed {len(result_dfs)} tickers")
+            return pd.concat(result_dfs, ignore_index=True)
         else:
-            df['rsi'] = np.nan
-
-        # Moving Average Convergence Divergence
-        macd = ta.macd(df['close'], fast=12, slow=26, signal=9)
-        if macd is not None and isinstance(macd, pd.DataFrame):
-            df['macd_line'] = macd.get('MACD_12_26_9', np.nan)
-            df['macd_signal'] = macd.get('MACDs_12_26_9', np.nan)
-            df['macd_histogram'] = macd.get('MACDh_12_26_9', np.nan)
-        else:
-            df['macd_line'] = df['macd_signal'] = df['macd_histogram'] = np.nan
-
-        # Simple Moving Averages
-        df['sma_12'] = ta.sma(df['close'], length=12)
-        df['sma_26'] = ta.sma(df['close'], length=26)
-        df['sma_50'] = ta.sma(df['close'], length=50)
-        df['sma_100'] = ta.sma(df['close'], length=100)
-
-        # Average True Range
-        df['atr'] = ta.atr(df['high'], df['low'], df['close'], length=14)
-
-        # Bollinger Bands
-        bb = ta.bbands(df['close'], length=20, std=2)
-        df['bb_lower'] = bb['BBL_20_2.0']
-        df['bb_middle'] = bb['BBM_20_2.0']
-        df['bb_upper'] = bb['BBU_20_2.0']
-
-        # Volume Weighted Average Price
-        df['vwap'] = ta.vwap(df['high'], df['low'], df['close'], df['volume'])
-
-        # Average Directional Index
-        adx = ta.adx(df['high'], df['low'], df['close'], length=14)
-        df['adx'] = adx['ADX_14']
-        df['adx_positive'] = adx['DMP_14']
-        df['adx_negative'] = adx['DMN_14']
-
-        # Stochastic Oscillator
-        stoch = ta.stoch(df['high'], df['low'], df['close'], k=14, d=3, smooth_k=3)
-        df['stoch_k'] = stoch['STOCHk_14_3_3']
-        df['stoch_d'] = stoch['STOCHd_14_3_3']
-
-        # On-Balance Volume
-        df['obv'] = ta.obv(df['close'], df['volume'])
-
-        logger.info("Successfully calculated all technical indicators")
-
-    except Exception as e:
-        logger.error(f"Error calculating indicators: {str(e)}")
-        # Add default NaN values for all indicators
-        for indicator in ['rsi', 'macd_line', 'macd_signal', 'macd_histogram',
-                         'sma_12', 'sma_26', 'sma_50', 'sma_100', 'atr',
-                         'bb_lower', 'bb_middle', 'bb_upper', 'vwap',
-                         'adx', 'adx_positive', 'adx_negative', 'stoch_k', 'stoch_d', 'obv']:
-            if indicator not in df.columns:
+            logger.error("No tickers were processed successfully")
+            return df
+    else:
+        # Single ticker case
+        if len(df) < 100:
+            logger.warning(f"Not enough data points ({len(df)}) for calculating indicators")
+            for indicator in ['rsi', 'macd_line', 'macd_signal', 'macd_histogram',
+                            'sma_12', 'sma_26', 'sma_50', 'sma_100', 'atr',
+                            'bb_lower', 'bb_middle', 'bb_upper', 'vwap',
+                            'adx', 'adx_positive', 'adx_negative', 'stoch_k', 'stoch_d', 'obv']:
                 df[indicator] = np.nan
-
-    # Reset index to get 'date' back as a column
-    df = df.reset_index()
-
-    return df
+            return df
+        
+        return calculate_single_df(df)
