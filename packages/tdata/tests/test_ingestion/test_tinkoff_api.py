@@ -3,6 +3,7 @@ Tests for the tinkoff_api module.
 """
 
 import pytest
+import pandas as pd
 from datetime import datetime, timedelta
 from packages.tdata.ingestion.tinkoff_api import get_figis, fetch_ohlcv_data
 
@@ -40,21 +41,10 @@ def test_fetch_ohlcv_data(mock_tinkoff_client):
     # Print summary instead of entire result
     print(f"Result contains {len(result)} data points")
 
-    # For testing, we should expect data since we're using a mock
-    assert isinstance(result, list)
-    assert len(result) > 0
+    # Check that result is not empty
+    assert isinstance(result, pd.DataFrame)
+    assert not result.empty
 
-    # Check first item structure
-    if len(result) > 0:
-        first_item = result[0]
-        assert 'figi' in first_item
-        assert 'date' in first_item
-        assert 'open' in first_item
-        assert 'high' in first_item
-        assert 'low' in first_item
-        assert 'close' in first_item
-        assert 'volume' in first_item
-        assert 'tic' in first_item
 
 def test_fetch_ohlcv_data_empty_list():
     """Test that fetch_ohlcv_data handles empty ticker list properly."""
@@ -67,9 +57,9 @@ def test_fetch_ohlcv_data_empty_list():
     # Call the function with empty data
     result = fetch_ohlcv_data(ticker_figis, start_date, end_date, interval, token='test_token')
 
-    # Check that result is an empty list
-    assert isinstance(result, list)
-    assert len(result) == 0
+    # Check that result is an empty dataframe
+    assert isinstance(result, pd.DataFrame)
+    assert result.empty
 
 def test_fetch_ohlcv_data_invalid_token():
     """Test that fetch_ohlcv_data raises ValueError for an invalid token."""

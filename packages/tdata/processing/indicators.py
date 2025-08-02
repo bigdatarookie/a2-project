@@ -7,6 +7,10 @@ import pandas as pd
 import pandas_ta as ta
 import numpy as np
 from typing import List, Optional, Union
+import warnings
+
+# Filter out the specific warning about timezone conversion
+warnings.filterwarnings('ignore', message='Converting to PeriodArray/Index representation will drop timezone information.')
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -16,7 +20,7 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
     Calculate technical indicators for a given DataFrame.
 
     Args:
-        df: DataFrame with OHLCV data. Must contain 'high', 'low', 'close', 'volume', 'date' columns.
+        df: DataFrame with OHLCV data. Must contain 'high', 'low', 'close', 'volume' columns and date pd.DatetimeIndex.
           If 'tic' column is present, indicators will be calculated per ticker.
           Column names are case-insensitive.
 
@@ -32,17 +36,14 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
     # Convert column names to lowercase for case-insensitive handling
     df.columns = [col.lower() for col in df.columns]
 
-    required_columns = ['high', 'low', 'close', 'volume', 'date']
+    required_columns = ['high', 'low', 'close', 'volume']
     for col in required_columns:
         if col not in df.columns:
             raise ValueError(f"Required column '{col}' not found in DataFrame")
 
     def calculate_single_df(data: pd.DataFrame) -> pd.DataFrame:
         """Helper function to calculate indicators for a single DataFrame"""
-        try:
-            # Sort by date and set index
-            data = data.sort_values('date').set_index('date')
-            
+        try:            
             # RSI
             rsi = ta.rsi(data['close'], length=14)
             data['rsi'] = rsi if rsi is not None else np.nan

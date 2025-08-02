@@ -13,6 +13,7 @@ from tinkoff.invest.services import InstrumentsService
 from tinkoff.invest.utils import quotation_to_decimal
 import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import pandas as pd
 
 from packages.tdata.config import TINKOFF_TOKEN, MAX_PERIODS, DEFAULT_RATE_LIMIT_PAUSE
 
@@ -77,7 +78,7 @@ def fetch_ohlcv_data(
     end_date: datetime,
     interval: str,
     token: str = TINKOFF_TOKEN
-) -> Dict[str, Any]:
+) -> pd.DataFrame:
     """
     Fetch OHLCV (Open, High, Low, Close, Volume) data for multiple instruments.
 
@@ -99,9 +100,13 @@ def fetch_ohlcv_data(
 
     logger.info(f"Fetching OHLCV data for {len(ticker_figis)} instruments from {start_date} to {end_date}")
 
-    # If no ticker_figis provided, return empty list immediately
+    # If no ticker_figis provided, return empty DataFrame with expected columns and DatetimeIndex
     if not ticker_figis:
-        return []
+        df = pd.DataFrame(
+            columns=['figi', 'open', 'high', 'low', 'close', 'volume', 'tic', 'day'],
+            index=pd.DatetimeIndex([], name='date')  # Empty DatetimeIndex
+        )
+        return df
 
     # Convert string interval to proper enum
     interval_map = {
@@ -252,4 +257,12 @@ def fetch_ohlcv_data(
                 all_data.extend(ticker_data)
 
     logger.info(f"Total data points fetched: {len(all_data)}")
-    return all_data
+    
+    # Convert list of dictionaries to DataFrame
+    df = pd.DataFrame(all_data)
+    
+    # Convert to DatetimeIndex and sort
+    df.index = pd.DatetimeIndex(pd.to_datetime(df['date']))
+    df = df.sort_index()
+    
+    return df
