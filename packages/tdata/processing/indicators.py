@@ -15,7 +15,7 @@ warnings.filterwarnings('ignore', message='Converting to PeriodArray/Index repre
 # Configure logger
 logger = logging.getLogger(__name__)
 
-def calculate_indicators(df: pd.DataFrame, drop_na_rows: bool = True) -> pd.DataFrame:
+def calculate_indicators(df: pd.DataFrame, drop_na_rows: bool = True, min_coverage: float = 0.9) -> pd.DataFrame:
     """
     Calculate technical indicators for a given DataFrame.
 
@@ -26,9 +26,11 @@ def calculate_indicators(df: pd.DataFrame, drop_na_rows: bool = True) -> pd.Data
         drop_na_rows: If True, removes rows where any indicator is NaN. This ensures all indicators
           are properly calculated for the remaining data. If False, keeps all rows, with NaN values
           for indicators that couldn't be calculated at certain points.
+        min_coverage: Minimum required data coverage (0-1) for each ticker. Tickers with less coverage
+          will be filtered out. Default is 0.9 (90% coverage).
 
     Returns:
-        DataFrame with added technical indicators
+        DataFrame with added technical indicators and filtered/trimmed data for consistent timeframes.
 
     Raises:
         ValueError: If required columns are missing
@@ -147,25 +149,52 @@ def calculate_indicators(df: pd.DataFrame, drop_na_rows: bool = True) -> pd.Data
     # Process data based on whether it contains multiple tickers
     if 'tic' in df.columns:
         # Multi-ticker case
-        result_dfs = []
-        # Sort tickers for consistent processing
+        result_dfs = {}
+        total_periods = len(df.index.unique())
+        
+        # Calculate coverage for each ticker
+        ticker_coverage = {}
         for ticker in sorted(df['tic'].unique()):
             ticker_data = df[df['tic'] == ticker].copy()
-            if len(ticker_data) < 100:
-                logger.warning(f"Not enough data points ({len(ticker_data)}) for ticker {ticker}")
-                continue
+            coverage = len(ticker_data) / total_periods
+            ticker_coverage[ticker] = coverage
+            
+            # Log coverage statistics
+            coverage_pct = coverage * 100
+            status = "✓" if coverage >= min_coverage else "✗"
+            logger.info(f"Ticker {ticker}: {coverage_pct:.1f}% coverage {status}")
+        
+        # Filter tickers meeting the coverage threshold
+        valid_tickers = [t for t, c in ticker_coverage.items() if c >= min_coverage]
+        logger.info(f"\nData Quality Statistics:")
+        logger.info(f"Total timeframes: {total_periods}")
+        logger.info(f"Original tickers: {len(ticker_coverage)}")
+        logger.info(f"Tickers with {min_coverage*100}% coverage: {len(valid_tickers)}")
+        
+        # Process valid tickers
+        min_length = float('inf')
+        for ticker in valid_tickers:
+            ticker_data = df[df['tic'] == ticker].copy()
             try:
                 processed_df = calculate_single_df(ticker_data)
-                result_dfs.append(processed_df)
+                result_dfs[ticker] = processed_df
+                min_length = min(min_length, len(processed_df))
                 logger.info(f"Successfully processed ticker {ticker}")
             except Exception as e:
                 logger.error(f"Error processing ticker {ticker}: {str(e)}")
                 continue
         
         if result_dfs:
-            logger.info(f"Successfully processed {len(result_dfs)} tickers")
-            # Concatenate while preserving the DatetimeIndex
-            result = pd.concat(result_dfs, axis=0)
+            # Trim all DataFrames to the same length and concatenate
+            result = pd.DataFrame()
+            for ticker in valid_tickers:
+                if ticker in result_dfs:
+                    ticker_data = result_dfs[ticker].iloc[:min_length]
+                    result = pd.concat([result, ticker_data])
+            
+            logger.info(f"\nFinal dataset statistics:")
+            logger.info(f"Valid tickers: {', '.join(valid_tickers)}")
+            logger.info(f"Dataset length: {min_length} periods")
             
             # Clean up NaN values if requested
             if drop_na_rows:
