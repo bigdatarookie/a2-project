@@ -15,7 +15,7 @@ warnings.filterwarnings('ignore', message='Converting to PeriodArray/Index repre
 # Configure logger
 logger = logging.getLogger(__name__)
 
-def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
+def calculate_indicators(df: pd.DataFrame, drop_na_rows: bool = True) -> pd.DataFrame:
     """
     Calculate technical indicators for a given DataFrame.
 
@@ -23,6 +23,9 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
         df: DataFrame with OHLCV data. Must contain 'high', 'low', 'close', 'volume' columns and date pd.DatetimeIndex.
           If 'tic' column is present, indicators will be calculated per ticker.
           Column names are case-insensitive.
+        drop_na_rows: If True, removes rows where any indicator is NaN. This ensures all indicators
+          are properly calculated for the remaining data. If False, keeps all rows, with NaN values
+          for indicators that couldn't be calculated at certain points.
 
     Returns:
         DataFrame with added technical indicators
@@ -35,6 +38,12 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     # Convert column names to lowercase for case-insensitive handling
     df.columns = [col.lower() for col in df.columns]
+    
+    # Convert numeric columns to float type
+    numeric_columns = ['open', 'high', 'low', 'close', 'volume']
+    for col in numeric_columns:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
 
     required_columns = ['high', 'low', 'close', 'volume']
     for col in required_columns:
@@ -43,13 +52,22 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
 
     def calculate_single_df(data: pd.DataFrame) -> pd.DataFrame:
         """Helper function to calculate indicators for a single DataFrame"""
-        try:            
+        try:
+            # Ensure we have a proper DatetimeIndex and data is sorted
+            if not isinstance(data.index, pd.DatetimeIndex):
+                data.index = pd.to_datetime(data.index)
+            data = data.sort_index()
+            
+            # Create clean series with the DatetimeIndex and remove any NaN values
+            data = data.dropna(subset=['open', 'high', 'low', 'close', 'volume'])
+            close_series = pd.Series(data['close'].values, index=data.index, name='close')
+            
             # RSI
-            rsi = ta.rsi(data['close'], length=14)
+            rsi = ta.rsi(close_series, length=14)
             data['rsi'] = rsi if rsi is not None else np.nan
             
             # MACD
-            macd = ta.macd(data['close'], fast=12, slow=26, signal=9)
+            macd = ta.macd(close_series, fast=12, slow=26, signal=9)
             if isinstance(macd, pd.DataFrame):
                 data['macd_line'] = macd.get('MACD_12_26_9', np.nan)
                 data['macd_signal'] = macd.get('MACDs_12_26_9', np.nan)
@@ -57,17 +75,22 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
             else:
                 data['macd_line'] = data['macd_signal'] = data['macd_histogram'] = np.nan
             
+            # Create clean series for each input
+            high_series = pd.Series(data['high'].values, index=data.index)
+            low_series = pd.Series(data['low'].values, index=data.index)
+            volume_series = pd.Series(data['volume'].values, index=data.index)
+            
             # Moving Averages
-            data['sma_12'] = ta.sma(data['close'], length=12)
-            data['sma_26'] = ta.sma(data['close'], length=26)
-            data['sma_50'] = ta.sma(data['close'], length=50)
-            data['sma_100'] = ta.sma(data['close'], length=100)
+            data['sma_12'] = ta.sma(close_series, length=12)
+            data['sma_26'] = ta.sma(close_series, length=26)
+            data['sma_50'] = ta.sma(close_series, length=50)
+            data['sma_100'] = ta.sma(close_series, length=100)
             
             # ATR
-            data['atr'] = ta.atr(data['high'], data['low'], data['close'], length=14)
+            data['atr'] = ta.atr(high_series, low_series, close_series, length=14)
             
             # Bollinger Bands
-            bb = ta.bbands(data['close'], length=20, std=2)
+            bb = ta.bbands(close_series, length=20, std=2)
             if isinstance(bb, pd.DataFrame):
                 data['bb_lower'] = bb['BBL_20_2.0']
                 data['bb_middle'] = bb['BBM_20_2.0']
@@ -75,11 +98,20 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
             else:
                 data['bb_lower'] = data['bb_middle'] = data['bb_upper'] = np.nan
             
-            # VWAP
-            data['vwap'] = ta.vwap(data['high'], data['low'], data['close'], data['volume'])
+            # VWAP (calculate manually to avoid pandas_ta datetime issues)
+            try:
+                # Calculate typical price
+                typical_price = (high_series + low_series + close_series) / 3
+                # Calculate VWAP
+                cumulative_tp_vol = (typical_price * volume_series).cumsum()
+                cumulative_vol = volume_series.cumsum()
+                data['vwap'] = cumulative_tp_vol / cumulative_vol
+            except Exception as e:
+                logger.warning(f"VWAP calculation failed: {str(e)}")
+                data['vwap'] = np.nan
             
             # ADX
-            adx = ta.adx(data['high'], data['low'], data['close'], length=14)
+            adx = ta.adx(high_series, low_series, close_series, length=14)
             if isinstance(adx, pd.DataFrame):
                 data['adx'] = adx['ADX_14']
                 data['adx_positive'] = adx['DMP_14']
@@ -88,7 +120,7 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
                 data['adx'] = data['adx_positive'] = data['adx_negative'] = np.nan
             
             # Stochastic
-            stoch = ta.stoch(data['high'], data['low'], data['close'], k=14, d=3, smooth_k=3)
+            stoch = ta.stoch(high_series, low_series, close_series, k=14, d=3, smooth_k=3)
             if isinstance(stoch, pd.DataFrame):
                 data['stoch_k'] = stoch['STOCHk_14_3_3']
                 data['stoch_d'] = stoch['STOCHd_14_3_3']
@@ -96,10 +128,10 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
                 data['stoch_k'] = data['stoch_d'] = np.nan
             
             # OBV
-            data['obv'] = ta.obv(data['close'], data['volume'])
+            data['obv'] = ta.obv(close_series, volume_series)
             
-            # Reset index to get date back as column
-            return data.reset_index()
+            # Keep the DatetimeIndex
+            return data
             
         except Exception as e:
             logger.error(f"Error calculating indicators: {str(e)}")
@@ -110,13 +142,14 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
                        'adx', 'adx_positive', 'adx_negative', 
                        'stoch_k', 'stoch_d', 'obv']:
                 data[col] = np.nan
-            return data.reset_index() if isinstance(data.index, pd.DatetimeIndex) else data
+            return data
 
     # Process data based on whether it contains multiple tickers
     if 'tic' in df.columns:
         # Multi-ticker case
         result_dfs = []
-        for ticker in df['tic'].unique():
+        # Sort tickers for consistent processing
+        for ticker in sorted(df['tic'].unique()):
             ticker_data = df[df['tic'] == ticker].copy()
             if len(ticker_data) < 100:
                 logger.warning(f"Not enough data points ({len(ticker_data)}) for ticker {ticker}")
@@ -131,7 +164,20 @@ def calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
         
         if result_dfs:
             logger.info(f"Successfully processed {len(result_dfs)} tickers")
-            return pd.concat(result_dfs, ignore_index=True)
+            # Concatenate while preserving the DatetimeIndex
+            result = pd.concat(result_dfs, axis=0)
+            
+            # Clean up NaN values if requested
+            if drop_na_rows:
+                indicator_columns = ['rsi', 'macd_line', 'macd_signal', 'macd_histogram',
+                                  'sma_12', 'sma_26', 'sma_50', 'sma_100', 'atr',
+                                  'bb_lower', 'bb_middle', 'bb_upper', 'vwap',
+                                  'adx', 'adx_positive', 'adx_negative',
+                                  'stoch_k', 'stoch_d', 'obv']
+                result = result.dropna(subset=indicator_columns)
+                logger.info(f"Removed rows with NaN indicators. Remaining rows: {len(result)}")
+            
+            return result
         else:
             logger.error("No tickers were processed successfully")
             return df

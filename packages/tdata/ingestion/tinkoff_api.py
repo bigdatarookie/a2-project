@@ -263,6 +263,8 @@ def fetch_ohlcv_data(
     
     # Convert to DatetimeIndex and sort
     df.index = pd.DatetimeIndex(pd.to_datetime(df['date']))
+    # Drop date column as it's now index
+    df.drop(columns=['date'], inplace=True)
     df = df.sort_index()
     
     return df
