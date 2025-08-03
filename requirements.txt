@@ -12,6 +12,7 @@ mplfinance>=0.12.10b0  # Latest beta with fixes
 pygame # for rendering animations
 box2d-py>=2.3.5 # physics engine for Lunar Lander
 moviepy
+opencv-python
 
 # machine learning & RL
 scikit-learn>=1.2.0,<2.0.0  # Optimized for newer Python
