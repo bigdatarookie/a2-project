@@ -13,9 +13,17 @@ This document outlines the workflow for managing Jupyter notebooks using GitHub 
   5. Verify changes after each operation by comparing expected content
   6. Log all changes for transparency
   ! Specail Note: Ensure all changes are made sequentially and contextually to avoid conflicts.
-- **Rollback Mechanism**: If a change fails, revert to the last known good state using the logged changes.
+
+## Development Guidelines
+- **Cell Context**: Always ensure the cell context is understood before making changes.
 - **Validation**: After each change, validate the cell content against expected results to ensure correctness.
-- **Keep it tidy**: I dont want any files being left unnescessary and too much individual images output to overcrowd notebooks.
+- **Keep it tidy**: Dont leave any unnecessary temporary files or variables in memory. Dont spam the notebook with too many cells and comments.
+- **Special symbols**: Dont use emojis or special symbols in the code cells. Use them only in markdown cells for documentation purposes.
+
+## System Specifications
+- Docker image = nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+- CPU = 12 logical cores
+- GPU = NVIDIA GeForce RTX 3070TI
 
 ## Set Notebook path based on the current context
 ```python
@@ -75,49 +83,22 @@ This tool allows for editing the content of a specific cell in the notebook. It 
 <parameter name="expectedContent">[expected_content]</parameter>
 </invoke>
 
-# 3. Verify additional imports with user
-<invoke name="copilot_verifyImports">
-<parameter name="cellId">[cell_id]</parameter>
-<parameter name="expectedImports">[expected_imports]</parameter>
-</invoke>
-
-# 4. Edit cell content
+# 3. Edit cell content
 <invoke name="copilot_editCell">
 <parameter name="cellId">[cell_id]</parameter>
 <parameter name="newContent">[new_content]</parameter>
 </invoke>
 
-# 5. Verify changes
+# 4. Verify changes
 <invoke name="copilot_verifyCellChange">
 <parameter name="cellId">[cell_id]</parameter>
 <parameter name="expectedContent">[expected_content]</parameter>
 </invoke>
 
-# 6. Log change
+# 5. Log change
 <invoke name="copilot_logChange">
 <parameter name="cellId">[cell_id]</parameter>
 <parameter name="newContent">[new_content]</parameter>
 <parameter name="changeDescription">[change_description]</parameter>
-</invoke>
-```
-
-### 4. Define Test Cell to assert all requested changes
-This tool defines a test cell that will be used to assert the correctness of the changes made in the notebook. It includes the expected output to validate the changes.
-
-```python
-<invoke name="copilot_defineTestCell">
-<parameter name="TestCellId">[test_cell_id]</parameter>
-<parameter name="testContent">[test_content]</parameter>
-<parameter name="expectedOutput">[expected_output]</parameter>
-</invoke>
-```
-
-### 5. Run Test Cell to Verify Changes
-This tool executes the modified cell to ensure that the changes work as expected.
-
-```python
-<invoke name="copilot_runTestCell">
-<parameter name="TestCellId">[test_cell_id]</parameter>
-<parameter name="expectedOutput">[expected_output]</parameter>
 </invoke>
 ```

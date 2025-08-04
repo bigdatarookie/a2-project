@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     swig \
     libfreetype6 \
     libpng16-16 \
+    libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

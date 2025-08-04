@@ -1,3 +1,5 @@
+# next time you need to apply on container : docker exec <container_id> pip3 install -r requirements.txt
+
 # core data handling
 numpy>=1.24.0,<2.0.0  # Much faster in Python 3.11
 pandas>=2.0.0,<3.0.0  # Latest stable with better performance
@@ -13,6 +15,7 @@ pygame # for rendering animations
 box2d-py>=2.3.5 # physics engine for Lunar Lander
 moviepy
 opencv-python
+seaborn
 
 # machine learning & RL
 scikit-learn>=1.2.0,<2.0.0  # Optimized for newer Python
